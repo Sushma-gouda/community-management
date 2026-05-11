@@ -15,6 +15,16 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardSecurityRouteImport } from './routes/dashboard.security'
 import { Route as DashboardResidentRouteImport } from './routes/dashboard.resident'
 import { Route as DashboardAdminRouteImport } from './routes/dashboard.admin'
+import { Route as DashboardSecurityVisitorLogsRouteImport } from './routes/dashboard.security.visitor-logs'
+import { Route as DashboardSecurityAddVisitorRouteImport } from './routes/dashboard.security.add-visitor'
+import { Route as DashboardSecurityActiveVisitorsRouteImport } from './routes/dashboard.security.active-visitors'
+import { Route as DashboardResidentSettingsRouteImport } from './routes/dashboard.resident.settings'
+import { Route as DashboardResidentProfileRouteImport } from './routes/dashboard.resident.profile'
+import { Route as DashboardResidentParkingRouteImport } from './routes/dashboard.resident.parking'
+import { Route as DashboardResidentNoticesRouteImport } from './routes/dashboard.resident.notices'
+import { Route as DashboardResidentFlatRouteImport } from './routes/dashboard.resident.flat'
+import { Route as DashboardResidentComplaintsRouteImport } from './routes/dashboard.resident.complaints'
+import { Route as DashboardResidentBillingRouteImport } from './routes/dashboard.resident.billing'
 import { Route as DashboardAdminVisitorsRouteImport } from './routes/dashboard.admin.visitors'
 import { Route as DashboardAdminSettingsRouteImport } from './routes/dashboard.admin.settings'
 import { Route as DashboardAdminResidentsRouteImport } from './routes/dashboard.admin.residents'
@@ -55,6 +65,65 @@ const DashboardAdminRoute = DashboardAdminRouteImport.update({
   path: '/dashboard/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardSecurityVisitorLogsRoute =
+  DashboardSecurityVisitorLogsRouteImport.update({
+    id: '/visitor-logs',
+    path: '/visitor-logs',
+    getParentRoute: () => DashboardSecurityRoute,
+  } as any)
+const DashboardSecurityAddVisitorRoute =
+  DashboardSecurityAddVisitorRouteImport.update({
+    id: '/add-visitor',
+    path: '/add-visitor',
+    getParentRoute: () => DashboardSecurityRoute,
+  } as any)
+const DashboardSecurityActiveVisitorsRoute =
+  DashboardSecurityActiveVisitorsRouteImport.update({
+    id: '/active-visitors',
+    path: '/active-visitors',
+    getParentRoute: () => DashboardSecurityRoute,
+  } as any)
+const DashboardResidentSettingsRoute =
+  DashboardResidentSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
+const DashboardResidentProfileRoute =
+  DashboardResidentProfileRouteImport.update({
+    id: '/profile',
+    path: '/profile',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
+const DashboardResidentParkingRoute =
+  DashboardResidentParkingRouteImport.update({
+    id: '/parking',
+    path: '/parking',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
+const DashboardResidentNoticesRoute =
+  DashboardResidentNoticesRouteImport.update({
+    id: '/notices',
+    path: '/notices',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
+const DashboardResidentFlatRoute = DashboardResidentFlatRouteImport.update({
+  id: '/flat',
+  path: '/flat',
+  getParentRoute: () => DashboardResidentRoute,
+} as any)
+const DashboardResidentComplaintsRoute =
+  DashboardResidentComplaintsRouteImport.update({
+    id: '/complaints',
+    path: '/complaints',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
+const DashboardResidentBillingRoute =
+  DashboardResidentBillingRouteImport.update({
+    id: '/billing',
+    path: '/billing',
+    getParentRoute: () => DashboardResidentRoute,
+  } as any)
 const DashboardAdminVisitorsRoute = DashboardAdminVisitorsRouteImport.update({
   id: '/visitors',
   path: '/visitors',
@@ -108,8 +177,8 @@ export interface FileRoutesByFullPath {
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
   '/dashboard/admin': typeof DashboardAdminRouteWithChildren
-  '/dashboard/resident': typeof DashboardResidentRoute
-  '/dashboard/security': typeof DashboardSecurityRoute
+  '/dashboard/resident': typeof DashboardResidentRouteWithChildren
+  '/dashboard/security': typeof DashboardSecurityRouteWithChildren
   '/dashboard/admin/billing': typeof DashboardAdminBillingRoute
   '/dashboard/admin/complaints': typeof DashboardAdminComplaintsRoute
   '/dashboard/admin/flats': typeof DashboardAdminFlatsRoute
@@ -119,14 +188,24 @@ export interface FileRoutesByFullPath {
   '/dashboard/admin/residents': typeof DashboardAdminResidentsRoute
   '/dashboard/admin/settings': typeof DashboardAdminSettingsRoute
   '/dashboard/admin/visitors': typeof DashboardAdminVisitorsRoute
+  '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
+  '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
+  '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
+  '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
+  '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
+  '/dashboard/resident/settings': typeof DashboardResidentSettingsRoute
+  '/dashboard/security/active-visitors': typeof DashboardSecurityActiveVisitorsRoute
+  '/dashboard/security/add-visitor': typeof DashboardSecurityAddVisitorRoute
+  '/dashboard/security/visitor-logs': typeof DashboardSecurityVisitorLogsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
   '/dashboard/admin': typeof DashboardAdminRouteWithChildren
-  '/dashboard/resident': typeof DashboardResidentRoute
-  '/dashboard/security': typeof DashboardSecurityRoute
+  '/dashboard/resident': typeof DashboardResidentRouteWithChildren
+  '/dashboard/security': typeof DashboardSecurityRouteWithChildren
   '/dashboard/admin/billing': typeof DashboardAdminBillingRoute
   '/dashboard/admin/complaints': typeof DashboardAdminComplaintsRoute
   '/dashboard/admin/flats': typeof DashboardAdminFlatsRoute
@@ -136,6 +215,16 @@ export interface FileRoutesByTo {
   '/dashboard/admin/residents': typeof DashboardAdminResidentsRoute
   '/dashboard/admin/settings': typeof DashboardAdminSettingsRoute
   '/dashboard/admin/visitors': typeof DashboardAdminVisitorsRoute
+  '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
+  '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
+  '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
+  '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
+  '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
+  '/dashboard/resident/settings': typeof DashboardResidentSettingsRoute
+  '/dashboard/security/active-visitors': typeof DashboardSecurityActiveVisitorsRoute
+  '/dashboard/security/add-visitor': typeof DashboardSecurityAddVisitorRoute
+  '/dashboard/security/visitor-logs': typeof DashboardSecurityVisitorLogsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -143,8 +232,8 @@ export interface FileRoutesById {
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
   '/dashboard/admin': typeof DashboardAdminRouteWithChildren
-  '/dashboard/resident': typeof DashboardResidentRoute
-  '/dashboard/security': typeof DashboardSecurityRoute
+  '/dashboard/resident': typeof DashboardResidentRouteWithChildren
+  '/dashboard/security': typeof DashboardSecurityRouteWithChildren
   '/dashboard/admin/billing': typeof DashboardAdminBillingRoute
   '/dashboard/admin/complaints': typeof DashboardAdminComplaintsRoute
   '/dashboard/admin/flats': typeof DashboardAdminFlatsRoute
@@ -154,6 +243,16 @@ export interface FileRoutesById {
   '/dashboard/admin/residents': typeof DashboardAdminResidentsRoute
   '/dashboard/admin/settings': typeof DashboardAdminSettingsRoute
   '/dashboard/admin/visitors': typeof DashboardAdminVisitorsRoute
+  '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
+  '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
+  '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
+  '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
+  '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
+  '/dashboard/resident/settings': typeof DashboardResidentSettingsRoute
+  '/dashboard/security/active-visitors': typeof DashboardSecurityActiveVisitorsRoute
+  '/dashboard/security/add-visitor': typeof DashboardSecurityAddVisitorRoute
+  '/dashboard/security/visitor-logs': typeof DashboardSecurityVisitorLogsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -173,6 +272,16 @@ export interface FileRouteTypes {
     | '/dashboard/admin/residents'
     | '/dashboard/admin/settings'
     | '/dashboard/admin/visitors'
+    | '/dashboard/resident/billing'
+    | '/dashboard/resident/complaints'
+    | '/dashboard/resident/flat'
+    | '/dashboard/resident/notices'
+    | '/dashboard/resident/parking'
+    | '/dashboard/resident/profile'
+    | '/dashboard/resident/settings'
+    | '/dashboard/security/active-visitors'
+    | '/dashboard/security/add-visitor'
+    | '/dashboard/security/visitor-logs'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -190,6 +299,16 @@ export interface FileRouteTypes {
     | '/dashboard/admin/residents'
     | '/dashboard/admin/settings'
     | '/dashboard/admin/visitors'
+    | '/dashboard/resident/billing'
+    | '/dashboard/resident/complaints'
+    | '/dashboard/resident/flat'
+    | '/dashboard/resident/notices'
+    | '/dashboard/resident/parking'
+    | '/dashboard/resident/profile'
+    | '/dashboard/resident/settings'
+    | '/dashboard/security/active-visitors'
+    | '/dashboard/security/add-visitor'
+    | '/dashboard/security/visitor-logs'
   id:
     | '__root__'
     | '/'
@@ -207,6 +326,16 @@ export interface FileRouteTypes {
     | '/dashboard/admin/residents'
     | '/dashboard/admin/settings'
     | '/dashboard/admin/visitors'
+    | '/dashboard/resident/billing'
+    | '/dashboard/resident/complaints'
+    | '/dashboard/resident/flat'
+    | '/dashboard/resident/notices'
+    | '/dashboard/resident/parking'
+    | '/dashboard/resident/profile'
+    | '/dashboard/resident/settings'
+    | '/dashboard/security/active-visitors'
+    | '/dashboard/security/add-visitor'
+    | '/dashboard/security/visitor-logs'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -214,8 +343,8 @@ export interface RootRouteChildren {
   SigninRoute: typeof SigninRoute
   SignupRoute: typeof SignupRoute
   DashboardAdminRoute: typeof DashboardAdminRouteWithChildren
-  DashboardResidentRoute: typeof DashboardResidentRoute
-  DashboardSecurityRoute: typeof DashboardSecurityRoute
+  DashboardResidentRoute: typeof DashboardResidentRouteWithChildren
+  DashboardSecurityRoute: typeof DashboardSecurityRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -261,6 +390,76 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard/admin'
       preLoaderRoute: typeof DashboardAdminRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/dashboard/security/visitor-logs': {
+      id: '/dashboard/security/visitor-logs'
+      path: '/visitor-logs'
+      fullPath: '/dashboard/security/visitor-logs'
+      preLoaderRoute: typeof DashboardSecurityVisitorLogsRouteImport
+      parentRoute: typeof DashboardSecurityRoute
+    }
+    '/dashboard/security/add-visitor': {
+      id: '/dashboard/security/add-visitor'
+      path: '/add-visitor'
+      fullPath: '/dashboard/security/add-visitor'
+      preLoaderRoute: typeof DashboardSecurityAddVisitorRouteImport
+      parentRoute: typeof DashboardSecurityRoute
+    }
+    '/dashboard/security/active-visitors': {
+      id: '/dashboard/security/active-visitors'
+      path: '/active-visitors'
+      fullPath: '/dashboard/security/active-visitors'
+      preLoaderRoute: typeof DashboardSecurityActiveVisitorsRouteImport
+      parentRoute: typeof DashboardSecurityRoute
+    }
+    '/dashboard/resident/settings': {
+      id: '/dashboard/resident/settings'
+      path: '/settings'
+      fullPath: '/dashboard/resident/settings'
+      preLoaderRoute: typeof DashboardResidentSettingsRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/profile': {
+      id: '/dashboard/resident/profile'
+      path: '/profile'
+      fullPath: '/dashboard/resident/profile'
+      preLoaderRoute: typeof DashboardResidentProfileRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/parking': {
+      id: '/dashboard/resident/parking'
+      path: '/parking'
+      fullPath: '/dashboard/resident/parking'
+      preLoaderRoute: typeof DashboardResidentParkingRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/notices': {
+      id: '/dashboard/resident/notices'
+      path: '/notices'
+      fullPath: '/dashboard/resident/notices'
+      preLoaderRoute: typeof DashboardResidentNoticesRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/flat': {
+      id: '/dashboard/resident/flat'
+      path: '/flat'
+      fullPath: '/dashboard/resident/flat'
+      preLoaderRoute: typeof DashboardResidentFlatRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/complaints': {
+      id: '/dashboard/resident/complaints'
+      path: '/complaints'
+      fullPath: '/dashboard/resident/complaints'
+      preLoaderRoute: typeof DashboardResidentComplaintsRouteImport
+      parentRoute: typeof DashboardResidentRoute
+    }
+    '/dashboard/resident/billing': {
+      id: '/dashboard/resident/billing'
+      path: '/billing'
+      fullPath: '/dashboard/resident/billing'
+      preLoaderRoute: typeof DashboardResidentBillingRouteImport
+      parentRoute: typeof DashboardResidentRoute
     }
     '/dashboard/admin/visitors': {
       id: '/dashboard/admin/visitors'
@@ -356,14 +555,62 @@ const DashboardAdminRouteWithChildren = DashboardAdminRoute._addFileChildren(
   DashboardAdminRouteChildren,
 )
 
+interface DashboardResidentRouteChildren {
+  DashboardResidentBillingRoute: typeof DashboardResidentBillingRoute
+  DashboardResidentComplaintsRoute: typeof DashboardResidentComplaintsRoute
+  DashboardResidentFlatRoute: typeof DashboardResidentFlatRoute
+  DashboardResidentNoticesRoute: typeof DashboardResidentNoticesRoute
+  DashboardResidentParkingRoute: typeof DashboardResidentParkingRoute
+  DashboardResidentProfileRoute: typeof DashboardResidentProfileRoute
+  DashboardResidentSettingsRoute: typeof DashboardResidentSettingsRoute
+}
+
+const DashboardResidentRouteChildren: DashboardResidentRouteChildren = {
+  DashboardResidentBillingRoute: DashboardResidentBillingRoute,
+  DashboardResidentComplaintsRoute: DashboardResidentComplaintsRoute,
+  DashboardResidentFlatRoute: DashboardResidentFlatRoute,
+  DashboardResidentNoticesRoute: DashboardResidentNoticesRoute,
+  DashboardResidentParkingRoute: DashboardResidentParkingRoute,
+  DashboardResidentProfileRoute: DashboardResidentProfileRoute,
+  DashboardResidentSettingsRoute: DashboardResidentSettingsRoute,
+}
+
+const DashboardResidentRouteWithChildren =
+  DashboardResidentRoute._addFileChildren(DashboardResidentRouteChildren)
+
+interface DashboardSecurityRouteChildren {
+  DashboardSecurityActiveVisitorsRoute: typeof DashboardSecurityActiveVisitorsRoute
+  DashboardSecurityAddVisitorRoute: typeof DashboardSecurityAddVisitorRoute
+  DashboardSecurityVisitorLogsRoute: typeof DashboardSecurityVisitorLogsRoute
+}
+
+const DashboardSecurityRouteChildren: DashboardSecurityRouteChildren = {
+  DashboardSecurityActiveVisitorsRoute: DashboardSecurityActiveVisitorsRoute,
+  DashboardSecurityAddVisitorRoute: DashboardSecurityAddVisitorRoute,
+  DashboardSecurityVisitorLogsRoute: DashboardSecurityVisitorLogsRoute,
+}
+
+const DashboardSecurityRouteWithChildren =
+  DashboardSecurityRoute._addFileChildren(DashboardSecurityRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SigninRoute: SigninRoute,
   SignupRoute: SignupRoute,
   DashboardAdminRoute: DashboardAdminRouteWithChildren,
-  DashboardResidentRoute: DashboardResidentRoute,
-  DashboardSecurityRoute: DashboardSecurityRoute,
+  DashboardResidentRoute: DashboardResidentRouteWithChildren,
+  DashboardSecurityRoute: DashboardSecurityRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
