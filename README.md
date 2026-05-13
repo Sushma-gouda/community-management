@@ -9,33 +9,42 @@ A full-stack community apartment management platform — **Communa** — built w
 ```
 community-apartment-management/
 │
-├── src/                          # Frontend source (React + TanStack Start SSR)
-│   ├── assets/                   # Static images
-│   ├── components/
-│   │   ├── auth/                 # Auth layout (sign in / sign up)
-│   │   ├── dashboard/            # Shared dashboard layout, nav configs
-│   │   ├── landing/              # Landing page sections
-│   │   └── ui/                   # shadcn/ui component library (50+ components)
-│   ├── hooks/                    # Custom React hooks (use-theme, use-mobile)
-│   ├── lib/                      # Utilities (cn, error handling)
-│   ├── routes/                   # File-based routes (TanStack Router)
-│   │   ├── __root.tsx            # Root shell + QueryClientProvider
-│   │   ├── index.tsx             # Landing page (/)
-│   │   ├── signin.tsx            # Sign in (/signin)
-│   │   ├── signup.tsx            # Sign up (/signup)
-│   │   ├── dashboard.admin.*     # Admin dashboard pages
-│   │   ├── dashboard.resident.*  # Resident dashboard pages
-│   │   └── dashboard.security.*  # Security dashboard pages
-│   ├── services/
-│   │   └── supabase/
-│   │       └── client.ts         # Supabase client + auth helpers
-│   ├── styles.css                # Global styles + Tailwind v4 theme tokens
-│   ├── router.tsx                # TanStack Router setup
-│   ├── routeTree.gen.ts          # Auto-generated route tree (do not edit)
-│   ├── server.ts                 # Cloudflare Workers SSR entry point
-│   └── start.ts                  # TanStack Start middleware entry
+├── frontend/                     # React app (Vite + TanStack Start SSR)
+│   ├── src/
+│   │   ├── assets/               # Static images
+│   │   ├── components/
+│   │   │   ├── auth/             # Auth layout (sign in / sign up)
+│   │   │   ├── dashboard/        # Shared dashboard layout, nav configs
+│   │   │   ├── landing/          # Landing page sections
+│   │   │   └── ui/               # shadcn/ui component library (50+ components)
+│   │   ├── hooks/                # Custom React hooks (use-theme, use-mobile)
+│   │   ├── lib/                  # Utilities (cn, error handling)
+│   │   ├── routes/               # File-based routes (TanStack Router)
+│   │   │   ├── __root.tsx        # Root shell + QueryClientProvider
+│   │   │   ├── index.tsx         # Landing page (/)
+│   │   │   ├── signin.tsx        # Sign in (/signin)
+│   │   │   ├── signup.tsx        # Sign up (/signup)
+│   │   │   ├── dashboard.admin.* # Admin dashboard pages
+│   │   │   ├── dashboard.resident.*
+│   │   │   └── dashboard.security.*
+│   │   ├── services/
+│   │   │   └── supabase/
+│   │   │       └── client.ts     # Supabase client + auth helpers
+│   │   ├── styles.css            # Global styles + Tailwind v4 theme tokens
+│   │   ├── router.tsx            # TanStack Router setup
+│   │   ├── routeTree.gen.ts      # Auto-generated route tree (do not edit)
+│   │   ├── server.ts             # Cloudflare Workers SSR entry point
+│   │   └── start.ts              # TanStack Start middleware entry
+│   ├── package.json              # Frontend dependencies + scripts
+│   ├── tsconfig.json
+│   ├── vite.config.ts            # Vite + TanStack Start config
+│   ├── wrangler.jsonc            # Cloudflare Workers deployment config
+│   ├── components.json           # shadcn/ui configuration
+│   ├── eslint.config.js
+│   ├── .env.example              # Frontend environment variable template
+│   └── .prettierrc / .prettierignore
 │
-├── backend/                      # Node.js backend (future integrations)
+├── backend/                      # Node.js API (Express + cron jobs)
 │   ├── controllers/              # Route handler functions
 │   ├── cron/
 │   │   └── paymentReminder.js    # Daily payment reminder job
@@ -52,14 +61,7 @@ community-apartment-management/
 │   ├── functions/                # Supabase Edge Functions
 │   └── seed.sql                  # Sample data for development
 │
-├── .env.example                  # Environment variable template
 ├── .gitignore
-├── components.json               # shadcn/ui configuration
-├── eslint.config.js
-├── package.json                  # Frontend dependencies + scripts
-├── tsconfig.json
-├── vite.config.ts                # Vite + TanStack Start config
-├── wrangler.jsonc                # Cloudflare Workers deployment config
 └── README.md
 ```
 
@@ -79,15 +81,16 @@ community-apartment-management/
 | Database | Supabase (PostgreSQL) |
 | Auth | Supabase Auth |
 | Deployment | Cloudflare Workers |
-| Backend | Node.js + Express (future) |
+| Backend | Node.js + Express |
 
 ---
 
 ## Getting Started
 
-### 1. Install dependencies
+### 1. Install frontend dependencies
 
 ```bash
+cd frontend
 bun install
 # or: npm install
 ```
@@ -113,6 +116,14 @@ bun run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
+
+### 4. Backend API (optional)
+
+```bash
+cd ../backend
+npm install
+npm run dev
+```
 
 ---
 
@@ -160,6 +171,8 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Available Scripts
 
+Run these from the `frontend/` directory:
+
 ```bash
 bun run dev          # Start development server
 bun run build        # Production build
@@ -168,11 +181,17 @@ bun run lint         # Run ESLint
 bun run format       # Run Prettier
 ```
 
+Cloudflare deploy (from `frontend/`):
+
+```bash
+npx wrangler deploy
+```
+
 ---
 
 ## Supabase Integration
 
-The Supabase client is pre-configured at `src/services/supabase/client.ts`.
+The Supabase client is pre-configured at `frontend/src/services/supabase/client.ts`.
 
 ```ts
 import { supabase } from '@/services/supabase/client'

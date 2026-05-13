@@ -8,6 +8,8 @@ dist-ssr
 .output
 .vinxi
 .nitro
+frontend/dist
+frontend/.output
 
 # ---- TanStack / Vite cache ----
 .tanstack/**
