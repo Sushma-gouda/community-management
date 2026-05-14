@@ -228,7 +228,7 @@ function SignUp() {
           if (regErr) {
             console.error("[Supabase] registerResidentRpc error:", regErr);
           } else {
-            await updateFlat(flatId, { occupancy_status: "occupied" }).catch(console.error);
+            await updateFlat(flatId, { status: "occupied" }).catch(console.error);
           }
         }
 

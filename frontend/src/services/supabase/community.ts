@@ -1,17 +1,23 @@
 import { supabase } from "@/services/supabase/client";
 
 export type BlockRow = { id: string; name: string; total_flats: number };
+
+/** Row from `public.flats` (matches core migration). */
 export type FlatRow = {
   id: string;
-  block_name: string;
+  block_id: string;
   flat_number: string;
   floor: number | null;
   sqft: number | null;
-
-  occupancy_status: string;
+  type: string | null;
+  /** `vacant` | `occupied` | `reserved` */
+  status: string;
   owner_name?: string | null;
-  created_at?: string;
+  created_at?: string | null;
 };
+
+/** Flat list row with resolved block label for tables. */
+export type FlatWithBlockName = FlatRow & { block_name: string };
 export type ResidentRow = {
   id: string;
   flat_id: string;
@@ -83,24 +89,23 @@ export type MaintenanceAssetRow = {
 };
 
 export async function fetchBlocks(): Promise<BlockRow[]> {
-  // Return hardcoded blocks A, B, C, D as requested by user
-  return [
-    { id: "A", name: "Block A", total_flats: 0 },
-    { id: "B", name: "Block B", total_flats: 0 },
-    { id: "C", name: "Block C", total_flats: 0 },
-    { id: "D", name: "Block D", total_flats: 0 },
-  ];
+  const { data, error } = await supabase.from("blocks").select("id, name, total_flats").order("name");
+  if (error) {
+    console.error("[fetchBlocks]", error.message);
+    return [];
+  }
+  return (data as BlockRow[]) ?? [];
 }
 
 export async function fetchVacantFlatsByBlock(blockId: string): Promise<FlatRow[]> {
   const { data, error } = await supabase
     .from("flats")
-    .select("id, block_name, flat_number, floor, sqft, occupancy_status")
-    .eq("block_name", blockId)
-    .eq("occupancy_status", "vacant")
+    .select("id, block_id, flat_number, floor, sqft, type, status, owner_name, created_at")
+    .eq("block_id", blockId)
+    .eq("status", "vacant")
     .order("flat_number");
   if (error) throw error;
-  return data ?? [];
+  return (data as FlatRow[]) ?? [];
 }
 
 export async function fetchResidentByUserId(userId: string): Promise<{
@@ -114,25 +119,51 @@ export async function fetchResidentByUserId(userId: string): Promise<{
     .eq("user_id", userId)
     .maybeSingle();
   if (e1 || !res) return null;
-  const { data: flat, error: e2 } = await supabase
+
+  const { data: row, error: e2 } = await supabase
     .from("flats")
-    .select("*")
+    .select(
+      `
+      id,
+      block_id,
+      flat_number,
+      floor,
+      sqft,
+      type,
+      status,
+      owner_name,
+      created_at,
+      blocks:block_id ( id, name, total_flats )
+    `,
+    )
     .eq("id", res.flat_id)
     .maybeSingle();
-  if (e2 || !flat) return null;
-  const { data: block, error: e3 } = await supabase
-    .from("blocks")
-    .select("*")
-    .eq("name", flat.block_name)
-    .maybeSingle();
-  if (e3 || !block) {
-    return {
-      resident: res as ResidentRow,
-      flat: flat as FlatRow,
-      block: { id: flat.block_name, name: flat.block_name, total_flats: 0 },
-    };
-  }
-  return { resident: res as ResidentRow, flat: flat as FlatRow, block: block as BlockRow };
+  if (e2 || !row) return null;
+
+  const flatData = row as any;
+
+  const block =
+    Array.isArray(flatData.blocks) && flatData.blocks.length > 0
+      ? flatData.blocks[0]
+      : {
+        id: flatData.block_id,
+        name: flatData.block_id,
+        total_flats: 0,
+      };
+
+  const flat: FlatRow = {
+    id: flatData.id,
+    block_id: flatData.block_id,
+    flat_number: flatData.flat_number,
+    floor: flatData.floor,
+    sqft: flatData.sqft,
+    type: flatData.type,
+    status: flatData.status,
+    owner_name: flatData.owner_name,
+    created_at: flatData.created_at,
+  };
+
+  return { resident: res as ResidentRow, flat, block };
 }
 
 export async function registerResidentRpc(args: {
@@ -162,10 +193,10 @@ export async function adminResidentCount(): Promise<number> {
 }
 
 export async function adminFlatsOccupancy(): Promise<{ total: number; occupied: number }> {
-  const { data, error } = await supabase.from("flats").select("occupancy_status");
+  const { data, error } = await supabase.from("flats").select("status");
   if (error || !data) return { total: 0, occupied: 0 };
   const total = data.length;
-  const occupied = data.filter((f) => f.occupancy_status === "occupied").length;
+  const occupied = data.filter((f) => f.status === "occupied").length;
   return { total, occupied };
 }
 
@@ -239,49 +270,94 @@ export async function fetchResidentsDirectory(): Promise<
 > {
   const { data: residents, error } = await supabase.from("residents").select("*").order("name");
   if (error || !residents?.length) return [];
-  const flats = await supabase.from("flats").select("id, flat_number, block_name");
+  const flats = await supabase.from("flats").select("id, flat_number, block_id");
   const blocks = await supabase.from("blocks").select("id, name, total_flats");
   if (flats.error || blocks.error) return [];
-  const fmap = new Map((flats.data as FlatRow[]).map((f) => [f.id, f]));
+  const fmap = new Map(
+    (flats.data as Array<Pick<FlatRow, "id" | "flat_number" | "block_id">>).map((f) => [f.id, f]),
+  );
   const bmap = new Map((blocks.data as BlockRow[]).map((b) => [b.id, b.name]));
   return (residents as ResidentRow[]).map((r) => {
     const f = fmap.get(r.flat_id);
     return {
       ...r,
       flat_number: f?.flat_number ?? "",
-      block_name: f ? (bmap.get(f.block_name) ?? f.block_name) : "",
+      block_name: f ? (bmap.get(f.block_id) ?? f.block_id) : "",
     };
   });
 }
 
-export async function fetchFlatsWithBlocks(): Promise<Array<FlatRow & { block_name: string }>> {
-  const { data: flats, error } = await supabase.from("flats").select("*").order("block_name");
-  if (error || !flats) return [];
-  const { data: blocks } = await supabase.from("blocks").select("id, name, total_flats");
-  const bmap = new Map((blocks ?? []).map((b: BlockRow) => [b.id, b.name]));
-  return (flats as FlatRow[]).map((f) => ({
-    ...f,
-    block_name: bmap.get(f.block_name) ?? f.block_name,
-  }));
+export async function fetchFlatsWithBlocks() {
+  const { data, error } = await supabase
+    .from("flats")
+    .select(`
+      id,
+      block_id,
+      flat_number,
+      floor,
+      sqft,
+      owner_name,
+      status,
+      blocks!inner (
+        id,
+        name
+      )
+    `);
+
+  if (error) {
+    console.error("Supabase error:", error);
+    return [];
+  }
+
+  return data;
 }
 
+
+
 export async function insertFlat(args: {
-  block_name: string;
+  block_id: string;
   flat_number: string;
   floor: number | null;
   sqft: number | null;
   owner_name?: string | null;
-}): Promise<{ error: string | null }> {
+  type?: string | null;
+}) {
   const { error } = await supabase.from("flats").insert({
-    ...args,
-    occupancy_status: "vacant",
+    block_id: args.block_id,
+    flat_number: args.flat_number,
+    floor: args.floor,
+    sqft: args.sqft,
+    type: args.type ?? null,
+    status: "vacant",
+    owner_name: args.owner_name ?? null,
   });
-  if (error) return { error: error.message };
+
+  if (error) {
+    console.error("insertFlat error:", error.message);
+    return { error: error.message };
+  }
+
   return { error: null };
 }
 
-export async function updateFlat(id: string, args: Partial<FlatRow>): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("flats").update(args).eq("id", id);
+/** Accepts DB columns; maps legacy `occupancy_status` → `status`. */
+export async function updateFlat(
+  id: string,
+  args: Partial<Pick<FlatRow, "block_id" | "flat_number" | "floor" | "sqft" | "type" | "status" | "owner_name">> & {
+    occupancy_status?: string;
+  },
+): Promise<{ error: string | null }> {
+  const payload: Record<string, unknown> = {};
+  if (args.block_id !== undefined) payload.block_id = args.block_id;
+  if (args.flat_number !== undefined) payload.flat_number = args.flat_number;
+  if (args.floor !== undefined) payload.floor = args.floor;
+  if (args.sqft !== undefined) payload.sqft = args.sqft;
+  if (args.type !== undefined) payload.type = args.type;
+  if (args.owner_name !== undefined) payload.owner_name = args.owner_name;
+  if (args.status !== undefined) payload.status = String(args.status).toLowerCase();
+  if (args.occupancy_status !== undefined) payload.status = String(args.occupancy_status).toLowerCase();
+
+  const { error } = await supabase.from("flats").update(payload).eq("id", id);
   if (error) return { error: error.message };
   return { error: null };
 }

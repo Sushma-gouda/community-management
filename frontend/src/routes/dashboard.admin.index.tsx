@@ -70,11 +70,11 @@ function AdminDashboard() {
     fetchFlatsWithBlocks().then((flats) => {
       const blockMap = new Map<string, { total: number; occupied: number }>();
       flats.forEach((f) => {
-        const b = f.block_name;
+        const b: string = (f.blocks as any)?.[0]?.name ?? "Unknown";
         if (!blockMap.has(b)) blockMap.set(b, { total: 0, occupied: 0 });
         const stat = blockMap.get(b)!;
         stat.total += 1;
-        if (f.occupancy_status === "occupied") stat.occupied += 1;
+        if (f.status === "occupied") stat.occupied += 1;
       });
       const data = Array.from(blockMap.entries()).map(([b, stat]) => ({
         b,
@@ -97,9 +97,6 @@ function AdminDashboard() {
               Here's what's happening across your community today.
             </p>
           </div>
-          <button className="inline-flex h-10 px-4 items-center rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition">
-            + New Notice
-          </button>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
