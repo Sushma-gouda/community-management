@@ -22,7 +22,7 @@ export type ProfileRow = {
   role: AppRole;
   full_name: string | null;
   phone: string | null;
-  block_name: string | null;
+  block_id: string | null;
   flat_number: string | null;
   family_count: number | null;
   flat_id: string | null;
@@ -41,6 +41,7 @@ type AuthContextValue = {
   /** Populated for logged-in users linked to `residents.user_id` */
   residentHome: ResidentHome | null;
   initialized: boolean;
+  loading: boolean;
   refreshProfile: () => Promise<void>;
 };
 
@@ -52,13 +53,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [residentHome, setResidentHome] = useState<ResidentHome | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const loadProfile = useCallback(async (u: User) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("role, full_name, phone, block_name, flat_number, family_count, flat_id")
+      .select("role, full_name, phone, block_id, flat_number, family_count, flat_id")
       .eq("id", u.id)
       .maybeSingle();
+
+    if (error) {
+      console.error("[AuthContext] Error loading profile from 'profiles' table:", error);
+    }
 
     if (error || !data?.role || !isAppRole(data.role)) {
       const role = await resolveUserRole(u);
@@ -70,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role,
         full_name: name,
         phone: null,
-        block_name: null,
+        block_id: null,
         flat_number: null,
         family_count: null,
         flat_id: null,
@@ -109,9 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     void (async () => {
-      const {
-        data: { session: initial },
-      } = await supabase.auth.getSession();
+      let initial = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        initial = data.session;
+      } catch (err: any) {
+        if (err?.message?.includes("Refresh Token")) {
+          await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+        }
+      }
       if (cancelled) return;
       setSession(initial);
       setUser(initial?.user ?? null);
@@ -125,13 +137,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      if (nextSession?.user) await loadProfile(nextSession.user);
-      else {
-        setProfile(null);
-        setResidentHome(null);
+    } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      try {
+        console.log(`[AuthContext] Auth state change: ${event}`);
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+        
+        if (nextSession?.user) {
+          setLoading(true);
+          await loadProfile(nextSession.user);
+          setLoading(false);
+        } else {
+          setProfile(null);
+          setResidentHome(null);
+          setLoading(false);
+        }
+
+        if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+          setInitialized(true);
+        }
+      } catch (err) {
+        console.error("[AuthContext] Error in onAuthStateChange handler:", err);
+        setLoading(false);
+        setInitialized(true);
       }
     });
 
@@ -148,9 +176,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       residentHome,
       initialized,
+      loading,
       refreshProfile,
     }),
-    [session, user, profile, residentHome, initialized, refreshProfile],
+    [session, user, profile, residentHome, initialized, loading, refreshProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

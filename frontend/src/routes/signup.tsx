@@ -19,6 +19,7 @@ import {
   type BlockRow,
   type FlatRow,
 } from "@/services/supabase/community";
+
 function Select({
   label,
   options,
@@ -27,6 +28,7 @@ function Select({
   value,
   onChange,
   disabled,
+  error,
 }: {
   label: string;
   options: { value: string; label: string }[];
@@ -35,6 +37,7 @@ function Select({
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  error?: string;
 }) {
   return (
     <label className="block">
@@ -50,7 +53,9 @@ function Select({
         disabled={disabled}
         className="w-full h-11 px-3 rounded-lg border border-input bg-background/50 text-sm
           focus:outline-none focus:ring-2 focus:ring-ring transition
-          disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled:opacity-60 disabled:cursor-not-allowed
+          aria-invalid:border-destructive aria-invalid:ring-destructive/30"
+        aria-invalid={!!error}
       >
         <option value="">Select…</option>
         {options.map((o) => (
@@ -59,6 +64,7 @@ function Select({
           </option>
         ))}
       </select>
+      {error && <p className="text-xs text-destructive mt-1">{error}</p>}
     </label>
   );
 }
@@ -82,6 +88,9 @@ function SignUp() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [blocksLoading, setBlocksLoading] = useState(true);
+  const [flatsLoading, setFlatsLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const navigate = useNavigate();
   const { user, profile, initialized } = useAuth();
 
@@ -94,12 +103,30 @@ function SignUp() {
   }
 
   useEffect(() => {
-    fetchBlocks().then(setBlocks).catch(console.error);
+    fetchBlocks()
+      .then(setBlocks)
+      .catch((err) => {
+        console.error("Error fetching blocks:", err);
+        setError("Failed to load available blocks. Please try again later.");
+      })
+      .finally(() => setBlocksLoading(false));
   }, []);
 
   useEffect(() => {
     if (blockId) {
-      fetchVacantFlatsByBlock(blockId).then(setFlatsList).catch(console.error);
+      console.log(`[SignUp] Block selected: ${blockId}. Fetching flats...`);
+      setFlatsLoading(true);
+      fetchVacantFlatsByBlock(blockId)
+        .then((flats) => {
+          console.log(`[SignUp] Received ${flats.length} flats for block ${blockId}`);
+          setFlatsList(flats);
+        })
+        .catch((err) => {
+          console.error("Error fetching flats:", err);
+          setError("Failed to load available flats for this block.");
+          setFlatsList([]);
+        })
+        .finally(() => setFlatsLoading(false));
       setFlatId(""); // Reset flat selection
     } else {
       setFlatsList([]);
@@ -110,6 +137,7 @@ function SignUp() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setValidationErrors({});
 
     if (!isSupabaseConfigured) {
       setError(
@@ -128,21 +156,27 @@ function SignUp() {
       return;
     }
 
+    const newErrors: Record<string, string> = {};
+
     if (role === "resident") {
-      if (
-        !fullName.trim() ||
-        !email.trim() ||
-        !phone.trim() ||
-        !blockId ||
-        !flatId ||
-        !familyCount
-      ) {
-        setError("Please fill in all required fields.");
+      if (!fullName.trim()) newErrors.fullName = "Full name is required";
+      if (!email.trim()) newErrors.email = "Email is required";
+      if (!phone.trim()) newErrors.phone = "Phone number is required";
+      if (!blockId) newErrors.blockId = "Please select a block";
+      if (!flatId) newErrors.flatId = "Please select a flat";
+      if (!familyCount) newErrors.familyCount = "Family members count is required";
+
+      if (Object.keys(newErrors).length > 0) {
+        setValidationErrors(newErrors);
         return;
       }
     } else {
-      if (!email.trim() || !password) {
-        setError("Please fill in all required fields.");
+      if (!fullName.trim()) newErrors.fullName = "Full name is required";
+      if (!email.trim()) newErrors.email = "Email is required";
+      if (!password) newErrors.password = "Password is required";
+
+      if (Object.keys(newErrors).length > 0) {
+        setValidationErrors(newErrors);
         return;
       }
     }
@@ -158,13 +192,13 @@ function SignUp() {
               role,
               full_name: fullName.trim(),
               phone: phone.trim(),
-              block_name: blockId,
+              block_id: blockId,
               flat_number: flatNumber,
               family_count: familyCount,
             }
           : {
               role,
-              full_name: email.split("@")[0] ?? "User",
+              full_name: fullName.trim() || email.split("@")[0] || "User",
             };
 
       const { data, error: signErr } = await supabase.auth.signUp({
@@ -203,7 +237,7 @@ function SignUp() {
             role,
             full_name: fullNameForProfile,
             phone: role === "resident" ? phone.trim() : null,
-            block_name: role === "resident" ? blockId : null,
+            block_id: role === "resident" ? blockId : null,
             flat_number: role === "resident" ? flatNumber : null,
             family_count: role === "resident" ? Number.parseInt(familyCount, 10) || null : null,
             updated_at: new Date().toISOString(),
@@ -272,8 +306,12 @@ function SignUp() {
               required
               autoComplete="name"
               value={fullName}
-              onChange={(ev) => setFullName(ev.target.value)}
+              onChange={(ev) => {
+                setFullName(ev.target.value);
+                setValidationErrors({ ...validationErrors, fullName: "" });
+              }}
               disabled={loading}
+              error={validationErrors.fullName}
             />
             <div className="grid grid-cols-2 gap-3">
               <Field
@@ -284,8 +322,12 @@ function SignUp() {
                 required
                 autoComplete="email"
                 value={email}
-                onChange={(ev) => setEmail(ev.target.value)}
+                onChange={(ev) => {
+                  setEmail(ev.target.value);
+                  setValidationErrors({ ...validationErrors, email: "" });
+                }}
                 disabled={loading}
+                error={validationErrors.email}
               />
               <Field
                 label="Phone"
@@ -295,8 +337,12 @@ function SignUp() {
                 required
                 autoComplete="tel"
                 value={phone}
-                onChange={(ev) => setPhone(ev.target.value)}
+                onChange={(ev) => {
+                  setPhone(ev.target.value);
+                  setValidationErrors({ ...validationErrors, phone: "" });
+                }}
                 disabled={loading}
+                error={validationErrors.phone}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -306,19 +352,37 @@ function SignUp() {
                 required
                 options={blocks.map((b) => ({ value: b.id, label: b.name }))}
                 value={blockId}
-                onChange={setBlockId}
-                disabled={loading}
+                onChange={(value) => {
+                  setBlockId(value);
+                  setValidationErrors({ ...validationErrors, blockId: "" });
+                }}
+                disabled={loading || blocksLoading}
+                error={validationErrors.blockId}
               />
               <Select
                 label="Flat"
                 name="flat_id"
                 required
-                options={flatsList.map((f) => ({ value: f.id, label: f.flat_number }))}
+                options={flatsList.map((f) => ({ value: f.id, label: `${f.flat_number}` }))}
                 value={flatId}
-                onChange={setFlatId}
-                disabled={loading || !blockId}
+                onChange={(value) => {
+                  setFlatId(value);
+                  setValidationErrors({ ...validationErrors, flatId: "" });
+                }}
+                disabled={loading || !blockId || flatsLoading}
+                error={validationErrors.flatId}
               />
             </div>
+            {blockId && flatsList.length === 0 && !flatsLoading && (
+              <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning">
+                No vacant flats available in this block. Please select another block.
+              </div>
+            )}
+            {flatsLoading && (
+              <div className="p-3 rounded-lg bg-foreground/5 border border-border text-sm text-muted-foreground">
+                Loading available flats...
+              </div>
+            )}
             <Field
               label="Family members"
               type="number"
@@ -327,8 +391,12 @@ function SignUp() {
               required
               hint="Number of people in your household"
               value={familyCount}
-              onChange={(ev) => setFamilyCount(ev.target.value)}
+              onChange={(ev) => {
+                setFamilyCount(ev.target.value);
+                setValidationErrors({ ...validationErrors, familyCount: "" });
+              }}
               disabled={loading}
+              error={validationErrors.familyCount}
             />
             <PasswordField
               required
@@ -338,11 +406,26 @@ function SignUp() {
               value={password}
               onChange={(ev) => setPassword(ev.target.value)}
               disabled={loading}
+              error={validationErrors.password}
             />
           </>
         )}
         {role !== "resident" && (
           <>
+            <Field
+              label="Full name"
+              name="full_name"
+              id="signup-full-name-alt"
+              required
+              autoComplete="name"
+              value={fullName}
+              onChange={(ev) => {
+                setFullName(ev.target.value);
+                setValidationErrors({ ...validationErrors, fullName: "" });
+              }}
+              disabled={loading}
+              error={validationErrors.fullName}
+            />
             <Field
               label="Email"
               type="email"

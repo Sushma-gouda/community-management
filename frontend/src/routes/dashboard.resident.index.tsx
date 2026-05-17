@@ -58,20 +58,23 @@ function ResidentDashboard() {
   }, [residentHome]);
 
   const handleVisitor = async () => {
-    if (!visitorName) return;
-    await insertVisitor({
+    if (!visitorName || !residentHome?.flat.id) return;
+    const { error } = await insertVisitor({
       name: visitorName,
       phone: visitorPhone,
-      flatNumber: residentHome?.flat.flat_number || "",
+      flat_id: residentHome.flat.id,
       purpose: "Guest",
-      hostName: residentHome?.resident.name,
     });
-    setVisitorName("");
-    setVisitorPhone("");
-    alert("Pass generated successfully");
+    if (error) {
+      alert("Error generating pass: " + error);
+    } else {
+      setVisitorName("");
+      setVisitorPhone("");
+      alert("Pass generated successfully");
+    }
   };
 
-  const displayName = residentHome?.resident.name || profile?.full_name || "Resident";
+  const displayName = residentHome?.resident.full_name || profile?.full_name || "Resident";
   const flatDisplay = residentHome
     ? `Flat ${residentHome.flat.flat_number} · ${residentHome.block.name} · ${residentHome.resident.family_count} family members`
     : "No flat assigned";
@@ -98,305 +101,189 @@ function ResidentDashboard() {
               to="/dashboard/resident/complaints"
               className="inline-flex h-10 px-4 items-center gap-2 rounded-lg glass text-sm font-medium hover:bg-foreground/5 transition"
             >
-              <MessageSquareWarning className="h-4 w-4" /> Raise Complaint
+              <MessageSquareWarning className="h-4 w-4" /> Help
             </Link>
           </div>
         </div>
 
-        {/* Pending bill banner */}
-        {unpaidBills.length > 0 && (
-          <div
-            className="relative overflow-hidden rounded-2xl shadow-elegant p-6 sm:p-8 text-white"
-            style={{ background: "var(--gradient-hero)" }}
-          >
-            <div className="absolute inset-0 opacity-30 mix-blend-overlay gradient-mesh" />
-            <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-              <div>
-                <div className="text-xs uppercase tracking-widest text-white/80">
-                  {unpaidBills[0].label}
-                </div>
-                <div className="mt-1 text-4xl font-semibold tracking-tight">
-                  ₹ {unpaidBills[0].amount}
-                </div>
-                <div className="mt-1.5 flex items-center gap-2 text-sm text-white/85">
-                  <Clock className="h-4 w-4" /> Due:{" "}
-                  {unpaidBills[0].due_date
-                    ? new Date(unpaidBills[0].due_date).toLocaleDateString()
-                    : "N/A"}
-                </div>
-              </div>
-              <button className="inline-flex h-11 px-6 items-center rounded-xl glass-dark text-white font-medium hover:bg-white/15 transition">
-                Pay Now
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Pending Bills"
-            value={`₹${totalUnpaid}`}
+            label="Outstanding"
+            value={`₹${totalUnpaid.toLocaleString()}`}
+            subText={unpaidBills.length > 0 ? `${unpaidBills.length} bill(s) due` : "All paid"}
             icon={Wallet}
             tone={totalUnpaid > 0 ? "warning" : "success"}
           />
           <StatCard
-            label="Open Complaints"
+            label="Complaints"
             value={openComplaintsCount.toString()}
+            subText={openComplaintsCount > 0 ? "Action required" : "No open issues"}
             icon={MessageSquareWarning}
-            tone={openComplaintsCount > 0 ? "primary" : "success"}
+            tone={openComplaintsCount > 0 ? "danger" : "muted"}
           />
-          <StatCard label="Expected Visitors" value="-" icon={ShieldCheck} tone="accent" />
           <StatCard
-            label="Recent Notices"
-            value={notices.length.toString()}
-            icon={Megaphone}
+            label="Parking"
+            value={parking ? parking.slot_number : "None"}
+            subText={parking ? `Level ${parking.level || "—"}` : "Unassigned"}
+            icon={Car}
+            tone="primary"
+          />
+          <StatCard
+            label="Trust Score"
+            value="98"
+            subText="Top 5% resident"
+            icon={ShieldCheck}
             tone="success"
           />
         </div>
 
-        {/* Main grid */}
-        <div className="grid lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 space-y-4">
-            {/* Complaints */}
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Main Column */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Recent Notices */}
             <Card
-              title="My Complaints"
+              title="Recent Notices"
+              icon={Megaphone}
               action={
-                <Link
-                  to="/dashboard/resident/complaints"
-                  className="text-xs px-3 py-1.5 rounded-md bg-primary/10 text-primary font-medium hover:bg-primary/15 transition"
-                >
-                  + New Complaint
-                </Link>
-              }
-            >
-              <ul className="divide-y divide-border">
-                {complaints.slice(0, 3).map((c) => (
-                  <li key={c.id} className="py-3 flex items-center gap-3">
-                    <div className="grid place-items-center h-10 w-10 rounded-xl bg-foreground/5 shrink-0">
-                      <MessageSquareWarning className="h-4 w-4 text-foreground/70" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{c.title}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(c.created_at).toLocaleDateString()}
-                      </div>
-                    </div>
-                    <Badge
-                      tone={
-                        c.status === "resolved"
-                          ? "success"
-                          : c.status === "open"
-                            ? "warning"
-                            : "primary"
-                      }
-                    >
-                      {c.status.replace("_", " ")}
-                    </Badge>
-                  </li>
-                ))}
-                {complaints.length === 0 && (
-                  <li className="py-4 text-center text-sm text-muted-foreground">
-                    No recent complaints.
-                  </li>
-                )}
-              </ul>
-              <Link
-                to="/dashboard/resident/complaints"
-                className="mt-3 block text-center text-xs text-primary hover:underline"
-              >
-                View all complaints →
-              </Link>
-            </Card>
-
-            {/* Notices */}
-            <Card
-              title="Latest Notices"
-              action={
-                <Link
-                  to="/dashboard/resident/notices"
-                  className="text-xs text-primary hover:underline"
-                >
+                <Link to="/dashboard/resident/" className="text-xs text-primary hover:underline">
                   View all
                 </Link>
               }
             >
-              <ul className="space-y-2">
+              <div className="space-y-4">
                 {notices.map((n) => (
-                  <li
-                    key={n.id}
-                    className="flex items-start gap-3 p-3 rounded-xl hover:bg-foreground/5 transition"
-                  >
-                    <div className="mt-1 h-2 w-2 rounded-full bg-[image:var(--gradient-primary)] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{n.title}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(n.published_at).toLocaleDateString()} ·{" "}
-                        {n.target_block === "all" ? "All Blocks" : n.target_block}
+                  <div key={n.id} className="group cursor-pointer">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium group-hover:text-primary transition">
+                            {n.title}
+                          </h4>
+                          {n.pinned && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-1">{n.body}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
+                          <Clock className="h-3 w-3" />
+                          {new Date(n.published_at).toLocaleDateString()}
+                          <span>·</span>
+                          <span className="capitalize">{n.tag || "General"}</span>
+                        </div>
                       </div>
                     </div>
-                    {n.tag && <Badge tone={n.pinned ? "danger" : "primary"}>{n.tag}</Badge>}
-                  </li>
+                  </div>
                 ))}
                 {notices.length === 0 && (
-                  <li className="p-4 text-center text-sm text-muted-foreground">
-                    No recent notices.
-                  </li>
+                  <div className="py-10 text-center text-muted-foreground">No recent notices.</div>
                 )}
-              </ul>
+              </div>
             </Card>
 
-            {/* Quick stats */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                {
-                  label: "Bills Paid",
-                  value: "12/13",
-                  icon: CheckCircle2,
-                  color: "var(--success)",
-                  pct: 92,
-                },
-                {
-                  label: "Complaints Resolved",
-                  value: "8/10",
-                  icon: TrendingUp,
-                  color: "var(--primary)",
-                  pct: 80,
-                },
-                {
-                  label: "Notices Read",
-                  value: "18/23",
-                  icon: AlertCircle,
-                  color: "var(--warning)",
-                  pct: 78,
-                },
-              ].map((s) => (
-                <div key={s.label} className="rounded-2xl glass shadow-card p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-muted-foreground">{s.label}</span>
-                    <s.icon className="h-4 w-4" style={{ color: `oklch(from ${s.color} l c h)` }} />
-                  </div>
-                  <div className="text-lg font-semibold">{s.value}</div>
-                  <div className="mt-2 h-1.5 rounded-full bg-foreground/5 overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${s.pct}%`, background: `oklch(from ${s.color} l c h)` }}
-                    />
+            {/* Quick Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Card title="Quick Pass" icon={ShieldCheck}>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Generate a temporary entry pass for your guests.
+                </p>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Guest Name"
+                    value={visitorName}
+                    onChange={(e) => setVisitorName(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg bg-foreground/[0.03] border border-border text-sm"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Guest Phone"
+                    value={visitorPhone}
+                    onChange={(e) => setVisitorPhone(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg bg-foreground/[0.03] border border-border text-sm"
+                  />
+                  <button
+                    onClick={handleVisitor}
+                    className="w-full h-9 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
+                  >
+                    Generate Pass
+                  </button>
+                </div>
+              </Card>
+
+              <Card title="Maintenance" icon={Building2}>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Report a new issue or track your existing requests.
+                </p>
+                <div className="space-y-2">
+                  <Link
+                    to="/dashboard/resident/complaints"
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-foreground/[0.03] transition group"
+                  >
+                    <span className="text-sm">Raise Complaint</span>
+                    <TrendingUp className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                  </Link>
+                  <div className="h-px bg-border/50" />
+                  <div className="flex items-center justify-between p-2 text-muted-foreground/50">
+                    <span className="text-sm">Request Service</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider">Soon</span>
                   </div>
                 </div>
-              ))}
+              </Card>
             </div>
           </div>
 
-          {/* Right column */}
-          <div className="space-y-4">
-            {/* Flat summary */}
-            <Card title="My Flat">
-              <div className="space-y-3">
-                {[
-                  { label: "Flat Number", value: residentHome?.flat.flat_number || "—" },
-                  { label: "Block", value: residentHome?.block.name || "—" },
-                  { label: "Floor", value: residentHome?.flat.floor?.toString() || "—" },
-                  {
-                    label: "Area",
-                    value: residentHome?.flat.sqft ? `${residentHome.flat.sqft} sq ft` : "—",
-                  },
-                  {
-                    label: "Family Members",
-                    value: residentHome?.resident.family_count?.toString() || "—",
-                  },
-                  { label: "Status", value: residentHome?.resident.status || "—" },
-                ].map((d) => (
-                  <div key={d.label} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{d.label}</span>
-                    <span className="font-medium">{d.value}</span>
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Bills Sidebar */}
+            <Card title="Pending Payments" icon={Wallet}>
+              <div className="space-y-4">
+                {unpaidBills.slice(0, 3).map((b) => (
+                  <div key={b.id} className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">{b.label}</div>
+                      <div className="text-[10px] text-muted-foreground">Due: {new Date(b.due_date!).toLocaleDateString()}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-bold">₹{Number(b.amount).toLocaleString()}</div>
+                      <Link to="/dashboard/resident/billing" className="text-[10px] text-primary hover:underline">Pay</Link>
+                    </div>
                   </div>
                 ))}
-              </div>
-              <Link
-                to="/dashboard/resident/flat"
-                className="mt-4 block text-center text-xs text-primary hover:underline"
-              >
-                View flat details →
-              </Link>
-            </Card>
-
-            {/* Parking */}
-            <Card title="My Parking">
-              <div className="rounded-xl bg-[image:var(--gradient-primary)] p-4 text-white">
-                <div className="flex items-center justify-between mb-3">
-                  <Car className="h-6 w-6" />
-                  <Badge tone="muted">{parking ? "Assigned" : "Unassigned"}</Badge>
+                {unpaidBills.length === 0 && (
+                  <div className="py-4 text-center">
+                    <CheckCircle2 className="h-8 w-8 text-success mx-auto mb-2 opacity-20" />
+                    <p className="text-xs text-muted-foreground">No pending bills</p>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-border">
+                  <Link to="/dashboard/resident/billing" className="text-xs text-center block w-full text-primary font-medium hover:underline">
+                    View Billing History
+                  </Link>
                 </div>
-                {parking ? (
-                  <>
-                    <div className="text-2xl font-semibold">{parking.slot_number}</div>
-                    <div className="text-sm text-white/80 mt-1">
-                      {parking.level} {parking.zone ? `· Zone ${parking.zone}` : ""}
-                    </div>
-                    <div className="mt-3 text-xs text-white/70">{parking.type} Vehicle</div>
-                  </>
-                ) : (
-                  <div className="text-sm text-white/80 mt-1">No parking slot assigned</div>
-                )}
               </div>
-              <Link
-                to="/dashboard/resident/parking"
-                className="mt-3 block text-center text-xs text-primary hover:underline"
-              >
-                View parking details →
-              </Link>
             </Card>
 
-            {/* Payment history */}
-            <Card
-              title="Payment History"
-              action={
-                <Link
-                  to="/dashboard/resident/billing"
-                  className="text-xs text-primary hover:underline"
-                >
-                  All bills
-                </Link>
-              }
-            >
-              <ul className="space-y-2.5">
-                {bills.slice(0, 3).map((p) => (
-                  <li key={p.id} className="flex items-center justify-between text-sm">
-                    <div>
-                      <div className="font-medium">{p.label}</div>
-                      <div className="text-xs text-muted-foreground">₹{p.amount}</div>
+            {/* Status Tracking */}
+            <Card title="Active Requests" icon={Clock}>
+              <div className="space-y-4">
+                {complaints
+                  .filter((c) => c.status !== "resolved")
+                  .slice(0, 3)
+                  .map((c) => (
+                    <div key={c.id} className="flex items-start gap-3">
+                      <div className="mt-1 h-2 w-2 rounded-full bg-warning shrink-0" />
+                      <div>
+                        <div className="text-sm font-medium line-clamp-1">{c.title}</div>
+                        <div className="text-[10px] text-muted-foreground capitalize">
+                          {c.status.replace("_", " ")} · {c.category}
+                        </div>
+                      </div>
                     </div>
-                    <Badge tone={p.status === "paid" ? "success" : "warning"}>{p.status}</Badge>
-                  </li>
-                ))}
-                {bills.length === 0 && (
-                  <li className="text-sm text-muted-foreground">No bills found.</li>
+                  ))}
+                {complaints.filter((c) => c.status !== "resolved").length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-4">No active requests</p>
                 )}
-              </ul>
-            </Card>
-
-            {/* Pre-approve visitor */}
-            <Card title="Pre-approve Visitor">
-              <div className="space-y-2.5">
-                <input
-                  placeholder="Visitor name"
-                  value={visitorName}
-                  onChange={(e) => setVisitorName(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg bg-foreground/5 border border-transparent focus:border-input focus:bg-background focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                />
-                <input
-                  placeholder="Phone number"
-                  value={visitorPhone}
-                  onChange={(e) => setVisitorPhone(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg bg-foreground/5 border border-transparent focus:border-input focus:bg-background focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                />
-                <button
-                  onClick={() => void handleVisitor()}
-                  className="w-full h-10 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium hover:shadow-glow transition"
-                >
-                  Generate Pass
-                </button>
               </div>
             </Card>
           </div>
@@ -405,4 +292,3 @@ function ResidentDashboard() {
     </DashboardLayout>
   );
 }
-

@@ -79,6 +79,9 @@ function SignIn() {
 
     setLoading(true);
     try {
+      // Clear any stale session data from previous projects
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -93,10 +96,13 @@ function SignIn() {
       const dest = dashboardPathForRole(accountRole);
       const selectedPath = dashboardPathForRole(role as AppRole);
 
+      console.log(`[SignIn] Authenticated: ${data.user.email}, Role: ${accountRole}, Selected: ${role}`);
+
       if (dest !== selectedPath) {
+        console.warn(`[SignIn] Role mismatch. Expected ${role}, but found ${accountRole}.`);
         await supabase.auth.signOut();
         setError(
-          `This account is registered as ${roleTabLabel(accountRole)}. Select "${roleTabLabel(accountRole)}" above, then sign in again.`,
+          `This account is registered as ${roleTabLabel(accountRole)}. Please select the "${roleTabLabel(accountRole)}" tab and try again.`,
         );
         return;
       }
@@ -136,7 +142,22 @@ function SignIn() {
             className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
             role="alert"
           >
-            {error}
+            <div className="flex flex-col gap-2">
+              <span>{error}</span>
+              {error.includes("registered as") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    window.location.reload();
+                  }}
+                  className="text-xs font-semibold underline text-left hover:text-destructive/80"
+                >
+                  Still stuck? Click here to clear browser session data and try again.
+                </button>
+              )}
+            </div>
           </div>
         )}
         <Field

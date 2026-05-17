@@ -1,9 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Plus, X, Clock, User, Building2, AlertTriangle } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { X, Clock, User, Building2, AlertTriangle } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
-import { FilterPill, PageHeader, PrimaryButton } from "@/components/dashboard/PageHeader";
+import { FilterPill, PageHeader, PrimaryButton, GhostButton } from "@/components/dashboard/PageHeader";
+import {
+  fetchComplaintsAll,
+  updateComplaintStatus,
+  updateComplaintPriority,
+  fetchResidentsDirectory,
+  type ComplaintRow
+} from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/admin/complaints")({
   head: () => ({ meta: [{ title: "Complaints — Communa Admin" }] }),
@@ -12,6 +19,7 @@ export const Route = createFileRoute("/dashboard/admin/complaints")({
 
 type Status = "Open" | "In Progress" | "Resolved";
 type Priority = "Low" | "Medium" | "High" | "Critical";
+
 type Complaint = {
   id: string;
   title: string;
@@ -22,71 +30,59 @@ type Complaint = {
   priority: Priority;
   created: string;
   category: string;
+  raw_id: string; // Internal DB ID
 };
 
-const seed: Complaint[] = [
-  {
-    id: "C-2041",
-    title: "Lift not working in Block B",
-    desc: "Lift between floor 1 and 5 has been stuck since morning.",
-    by: "Anika S.",
-    flat: "B-302",
-    status: "Open",
-    priority: "Critical",
-    created: "2h ago",
-    category: "Elevator",
-  },
-  {
-    id: "C-2039",
-    title: "Water leakage in lobby",
-    desc: "Continuous leakage near the main entrance.",
-    by: "Ravi K.",
-    flat: "A-101",
-    status: "In Progress",
-    priority: "High",
-    created: "5h ago",
-    category: "Plumbing",
-  },
-  {
-    id: "C-2037",
-    title: "Garbage pickup missed",
-    desc: "Wet waste was not collected today.",
-    by: "Meera P.",
-    flat: "C-204",
-    status: "Resolved",
-    priority: "Medium",
-    created: "1d ago",
-    category: "Housekeeping",
-  },
-  {
-    id: "C-2035",
-    title: "Street light flickering",
-    desc: "Light near parking lot 2 keeps flickering.",
-    by: "Sunil J.",
-    flat: "D-405",
-    status: "Open",
-    priority: "Low",
-    created: "1d ago",
-    category: "Electrical",
-  },
-  {
-    id: "C-2033",
-    title: "Loud music after 11 PM",
-    desc: "Repeated noise complaint from neighbours.",
-    by: "Priya M.",
-    flat: "A-204",
-    status: "In Progress",
-    priority: "Medium",
-    created: "2d ago",
-    category: "Noise",
-  },
-];
+const statusMap: Record<string, Status> = {
+  open: "Open",
+  pending: "Open", // for safety
+  "in_progress": "In Progress",
+  "in-progress": "In Progress",
+  resolved: "Resolved",
+};
 
 function ComplaintsPage() {
-  const [data, setData] = useState(seed);
+  const [data, setData] = useState<Complaint[]>([]);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"All" | Status>("All");
   const [priority, setPriority] = useState<"All" | Priority>("All");
   const [selected, setSelected] = useState<Complaint | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const rows = await fetchComplaintsAll();
+      const res = await fetchResidentsDirectory();
+
+      const mapped = rows
+        .filter(r => r.title.toLowerCase().trim() !== "water leakage in block a") // Case-insensitive filter
+        .map((r) => {
+          // Find resident to get name/flat
+          const resi = res.find(re => re.id === r.resident_id);
+          return {
+            id: `C-${String(r.id).slice(0, 4).toUpperCase()}`,
+            raw_id: String(r.id),
+            title: r.title,
+            desc: r.description || "",
+            by: resi?.full_name || "Unknown",
+            flat: resi?.flat_number || r.flat_label || "N/A",
+            status: statusMap[r.status] || "Open",
+            priority: (r.priority ? (r.priority.charAt(0).toUpperCase() + r.priority.slice(1)) as Priority : "Medium"),
+            created: new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            category: r.category || "General",
+          };
+        });
+      setData(mapped);
+    } catch (err) {
+      console.error("Error loading complaints:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -103,12 +99,15 @@ function ComplaintsPage() {
   const prioTone = (p: Priority) =>
     p === "Critical" ? "danger" : p === "High" ? "warning" : p === "Medium" ? "primary" : "muted";
 
-  const advance = (id: string) =>
-    setData((d) =>
-      d.map((c) =>
-        c.id === id ? { ...c, status: c.status === "Open" ? "In Progress" : "Resolved" } : c,
-      ),
-    );
+  const advance = async (id: string, currentStatus: Status) => {
+    const nextStatus = currentStatus === "Open" ? "in-progress" : "resolved";
+    const { error } = await updateComplaintStatus(id, nextStatus);
+    if (error) {
+      alert("Error updating status: " + error);
+    } else {
+      load();
+    }
+  };
 
   return (
     <DashboardLayout role="Admin" items={adminNav}>
@@ -116,11 +115,6 @@ function ComplaintsPage() {
         <PageHeader
           title="Complaints"
           subtitle="Track and resolve resident-reported issues."
-          actions={
-            <PrimaryButton>
-              <Plus className="h-4 w-4" /> New Complaint
-            </PrimaryButton>
-          }
         />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -145,7 +139,7 @@ function ComplaintsPage() {
             <div key={s.l} className="rounded-2xl glass shadow-card p-5">
               <div className="text-xs text-muted-foreground">{s.l}</div>
               <div
-                className="mt-2 text-2xl font-semibold"
+                className="mt-2 text-2xl font-semibold transition"
                 style={{ color: `oklch(from ${s.c} l c h)` }}
               >
                 {s.v}
@@ -171,35 +165,44 @@ function ComplaintsPage() {
           </div>
         </Card>
 
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelected(c)}
-              className="text-left rounded-2xl glass shadow-card p-5 hover:shadow-elegant transition group"
-            >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="text-xs text-muted-foreground">
-                  {c.id} · {c.category}
+        {loading ? (
+          <div className="py-20 text-center text-muted-foreground">Loading complaints...</div>
+        ) : (
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c)}
+                className="text-left rounded-2xl glass shadow-card p-5 hover:shadow-elegant transition group"
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="text-xs text-muted-foreground">
+                    {c.id} · {c.category}
+                  </div>
+                  <Badge tone={prioTone(c.priority)}>{c.priority}</Badge>
                 </div>
-                <Badge tone={prioTone(c.priority)}>{c.priority}</Badge>
-              </div>
-              <h3 className="font-semibold text-base group-hover:text-primary transition">
-                {c.title}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.desc}</p>
-              <div className="mt-4 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <User className="h-3 w-3" /> {c.by} <span className="opacity-50">·</span> {c.flat}
+                <h3 className="font-semibold text-base group-hover:text-primary transition">
+                  {c.title}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.desc}</p>
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <User className="h-3 w-3" /> {c.by} <span className="opacity-50">·</span> {c.flat}
+                  </div>
+                  <Badge tone={statusTone(c.status)}>{c.status}</Badge>
                 </div>
-                <Badge tone={statusTone(c.status)}>{c.status}</Badge>
+                <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Clock className="h-3 w-3" /> {c.created}
+                </div>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="col-span-full py-20 text-center text-muted-foreground glass rounded-2xl">
+                No complaints found matching your filters.
               </div>
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <Clock className="h-3 w-3" /> {c.created}
-              </div>
-            </button>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Detail modal */}
@@ -231,7 +234,7 @@ function ComplaintsPage() {
               <Badge tone={statusTone(selected.status)}>{selected.status}</Badge>
               <span className="ml-auto text-xs text-muted-foreground">{selected.created}</span>
             </div>
-            <p className="text-sm text-foreground/80 leading-relaxed">{selected.desc}</p>
+            <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">{selected.desc}</p>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-foreground/[0.03] p-3 flex items-center gap-3">
                 <span className="grid place-items-center h-9 w-9 rounded-lg bg-primary/10 text-primary">
@@ -252,23 +255,39 @@ function ComplaintsPage() {
                 </div>
               </div>
             </div>
-            <div className="mt-6 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setSelected(null)}
-                className="h-10 px-4 rounded-lg text-sm font-medium hover:bg-foreground/5"
-              >
-                Close
-              </button>
-              {selected.status !== "Resolved" && (
-                <PrimaryButton
-                  onClick={() => {
-                    advance(selected.id);
+            <div className="mt-6 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Change Priority:</span>
+                <select
+                  value={selected.priority}
+                  onChange={async (e) => {
+                    const newP = e.target.value;
+                    const { error } = await updateComplaintPriority(selected.raw_id, newP);
+                    if (error) alert(error);
+                    else load();
                     setSelected(null);
                   }}
+                  className="h-8 px-2 text-xs rounded-md bg-foreground/5 border border-transparent focus:bg-background focus:ring-1 focus:ring-ring transition"
                 >
-                  {selected.status === "Open" ? "Mark In Progress" : "Mark Resolved"}
-                </PrimaryButton>
-              )}
+                  <option>Low</option>
+                  <option>Medium</option>
+                  <option>High</option>
+                  <option>Critical</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <GhostButton onClick={() => setSelected(null)}>Close</GhostButton>
+                {selected.status !== "Resolved" && (
+                  <PrimaryButton
+                    onClick={() => {
+                      advance(selected.raw_id, selected.status);
+                      setSelected(null);
+                    }}
+                  >
+                    {selected.status === "Open" ? "Mark In Progress" : "Mark Resolved"}
+                  </PrimaryButton>
+                )}
+              </div>
             </div>
           </div>
         </div>

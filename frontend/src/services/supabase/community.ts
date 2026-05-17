@@ -20,43 +20,46 @@ export type FlatRow = {
 export type FlatWithBlockName = FlatRow & { block_name: string };
 export type ResidentRow = {
   id: string;
+  user_id?: string | null;
+  full_name: string;
+  email: string;
+  phone?: string | null;
   flat_id: string;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  family_count: number;
-  status: string;
-  user_id: string | null;
+  family_count?: number | null;
+  role?: string;
+  created_at?: string;
 };
 export type ComplaintRow = {
-  id: string;
+  id: number | string; // Handle both BigInt and UUID
   resident_id: string | null;
   title: string;
-  body: string | null;
+  description: string | null; // Match actual DB schema
   status: string;
   flat_label: string | null;
+  category: string | null;
+  priority: string | null;
   created_at: string;
 };
 export type BillRow = {
-  id: string;
-  resident_id: string;
-  label: string;
+  id: number | string;
+  flat_id: string; // Using flat_id instead of resident_id as per your schema
   amount: number;
-  status: string;
+  status: string; // 'pending', 'paid', 'overdue'
   due_date: string | null;
   paid_at: string | null;
-  created_at: string;
+  generated_at: string;
+  payment_method?: string | null;
+  transaction_id?: string | null;
 };
 export type VisitorRow = {
   id: string;
   name: string;
   phone: string | null;
-  flat_number: string | null;
-  host_name: string | null;
+  flat_id: string | null;
   purpose: string;
-  vehicle: string | null;
-  check_in: string;
-  check_out: string | null;
+  vehicle_number: string | null;
+  entry_time: string;
+  exit_time: string | null;
 };
 export type NoticeRow = {
   id: string;
@@ -73,7 +76,6 @@ export type ParkingSlotRow = {
   level: string | null;
   zone: string | null;
   type: string | null;
-
   status: string;
   flat_id: string | null;
 };
@@ -89,401 +91,227 @@ export type MaintenanceAssetRow = {
 };
 
 export async function fetchBlocks(): Promise<BlockRow[]> {
-  const { data, error } = await supabase.from("blocks").select("id, name, total_flats").order("name");
-  if (error) {
-    console.error("[fetchBlocks]", error.message);
-    return [];
-  }
-  return (data as BlockRow[]) ?? [];
+  const { data, error } = await supabase.from("blocks").select("*").order("name");
+  return error ? [] : (data as BlockRow[]) || [];
 }
 
 export async function fetchVacantFlatsByBlock(blockId: string): Promise<FlatRow[]> {
-  const { data, error } = await supabase
-    .from("flats")
-    .select("id, block_id, flat_number, floor, sqft, type, status, owner_name, created_at")
-    .eq("block_id", blockId)
-    .eq("status", "vacant")
-    .order("flat_number");
-  if (error) throw error;
-  return (data as FlatRow[]) ?? [];
+  const { data, error } = await supabase.from("flats").select("*").eq("block_id", blockId).or("status.ilike.vacant,status.is.null").order("flat_number");
+  return error ? [] : (data as FlatRow[]) || [];
 }
 
-export async function fetchResidentByUserId(userId: string): Promise<{
-  resident: ResidentRow;
-  flat: FlatRow;
-  block: BlockRow;
-} | null> {
-  const { data: res, error: e1 } = await supabase
-    .from("residents")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+export async function fetchResidentByUserId(userId: string): Promise<{ resident: ResidentRow; flat: FlatRow; block: BlockRow; } | null> {
+  const { data: res, error: e1 } = await supabase.from("residents").select("*").eq("user_id", userId).maybeSingle();
   if (e1 || !res) return null;
-
-  const { data: row, error: e2 } = await supabase
-    .from("flats")
-    .select(
-      `
-      id,
-      block_id,
-      flat_number,
-      floor,
-      sqft,
-      type,
-      status,
-      owner_name,
-      created_at,
-      blocks:block_id ( id, name, total_flats )
-    `,
-    )
-    .eq("id", res.flat_id)
-    .maybeSingle();
+  const { data: row, error: e2 } = await supabase.from("flats").select(`*, blocks:block_id ( id, name, total_flats )`).eq("id", res.flat_id).maybeSingle();
   if (e2 || !row) return null;
-
   const flatData = row as any;
-
-  const block =
-    Array.isArray(flatData.blocks) && flatData.blocks.length > 0
-      ? flatData.blocks[0]
-      : {
-        id: flatData.block_id,
-        name: flatData.block_id,
-        total_flats: 0,
-      };
-
-  const flat: FlatRow = {
-    id: flatData.id,
-    block_id: flatData.block_id,
-    flat_number: flatData.flat_number,
-    floor: flatData.floor,
-    sqft: flatData.sqft,
-    type: flatData.type,
-    status: flatData.status,
-    owner_name: flatData.owner_name,
-    created_at: flatData.created_at,
-  };
-
-  return { resident: res as ResidentRow, flat, block };
+  const block = Array.isArray(flatData.blocks) ? flatData.blocks[0] : (flatData.blocks || { id: flatData.block_id, name: "N/A", total_flats: 0 });
+  return { resident: res as ResidentRow, flat: flatData as FlatRow, block };
 }
 
-export async function registerResidentRpc(args: {
-  flatId: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  familyCount: number;
-}): Promise<{ error: string | null }> {
-  const { error } = await supabase.rpc("register_resident", {
-    p_flat_id: args.flatId,
-    p_full_name: args.fullName,
-    p_email: args.email,
-    p_phone: args.phone,
-    p_family_count: args.familyCount,
-  });
-  if (error) return { error: error.message };
-  return { error: null };
+export async function registerResidentRpc(args: { flatId: string; fullName: string; email: string; phone: string; familyCount: number; }): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc("register_resident", { p_flat_id: args.flatId, p_full_name: args.fullName, p_email: args.email, p_phone: args.phone, p_family_count: args.familyCount });
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function adminResidentCount(): Promise<number> {
-  const { count, error } = await supabase
-    .from("residents")
-    .select("*", { count: "exact", head: true });
-  if (error) return 0;
-  return count ?? 0;
+  const { count, error } = await supabase.from("residents").select("*", { count: "exact", head: true });
+  return error ? 0 : count ?? 0;
 }
 
 export async function adminFlatsOccupancy(): Promise<{ total: number; occupied: number }> {
   const { data, error } = await supabase.from("flats").select("status");
   if (error || !data) return { total: 0, occupied: 0 };
-  const total = data.length;
-  const occupied = data.filter((f) => f.status === "occupied").length;
-  return { total, occupied };
+  return { total: data.length, occupied: data.filter((f) => f.status === "occupied").length };
 }
 
 export async function adminComplaintStats(): Promise<{ open: number }> {
   const { data, error } = await supabase.from("complaints").select("status");
   if (error || !data) return { open: 0 };
-  const open = data.filter((c) => c.status === "open" || c.status === "in_progress").length;
-  return { open };
+  return { open: data.filter((c) => c.status === "open" || c.status === "in_progress").length };
 }
 
 export async function adminUnpaidBillsTotal(): Promise<number> {
-  const { data, error } = await supabase
-    .from("bills")
-    .select("amount, status")
-    .eq("status", "unpaid");
+  const { data, error } = await supabase.from("billing").select("amount, status").eq("status", "pending");
   if (error || !data) return 0;
   return data.reduce((s, b) => s + Number(b.amount), 0);
 }
 
 export async function adminActiveVisitorCount(): Promise<number> {
-  const { count, error } = await supabase
-    .from("visitors")
-    .select("*", { count: "exact", head: true })
-    .is("check_out", null);
-  if (error) return 0;
-  return count ?? 0;
+  const { count, error } = await supabase.from("visitors").select("*", { count: "exact", head: true }).is("exit_time", null);
+  return error ? 0 : count ?? 0;
 }
 
 export async function fetchRecentComplaints(limit: number): Promise<ComplaintRow[]> {
-  const { data, error } = await supabase
-    .from("complaints")
-    .select("id, resident_id, title, body, status, flat_label, created_at")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) return [];
-  return (data as ComplaintRow[]) ?? [];
+  const { data, error } = await supabase.from("complaints").select("*").order("created_at", { ascending: false }).limit(limit);
+  return error ? [] : (data as ComplaintRow[]) ?? [];
+}
+
+export async function updateOverdueBills(): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  await supabase.from("billing").update({ status: "overdue" }).eq("status", "pending").lt("due_date", today);
 }
 
 export async function fetchRecentBills(limit: number): Promise<BillRow[]> {
-  const { data, error } = await supabase
-    .from("bills")
-    .select("id, resident_id, label, amount, status, due_date, paid_at, created_at")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) return [];
-  return (data as BillRow[]) ?? [];
+  await updateOverdueBills();
+  const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false }).limit(limit);
+  return error ? [] : (data as BillRow[]) ?? [];
+}
+
+export async function fetchBillsAll(): Promise<BillRow[]> {
+  await updateOverdueBills();
+  const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false });
+  return error ? [] : (data as BillRow[]) ?? [];
+}
+
+export async function fetchBillsForResident(flatId: string): Promise<BillRow[]> {
+  await updateOverdueBills();
+  const { data, error } = await supabase.from("billing").select("*").eq("flat_id", flatId).order("generated_at", { ascending: false });
+  return error ? [] : (data as BillRow[]) ?? [];
+}
+
+export async function createBill(args: { flat_id: string; amount: number; due_date: string; }): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("billing").insert({ flat_id: args.flat_id, amount: args.amount, due_date: args.due_date, status: "pending", generated_at: new Date().toISOString() });
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function createBillsBulk(args: { target: "all" | string; amount: number; due_date: string; label?: string; }): Promise<{ count: number; error: string | null }> {
+  let query = supabase.from("flats").select("id, block_id");
+  if (args.target !== "all") query = query.eq("block_id", args.target);
+  const { data: targets, error: tErr } = await query;
+  if (tErr || !targets) return { count: 0, error: tErr?.message || "No targets found" };
+  
+  const now = new Date().toISOString();
+  const inserts = targets.map(t => ({ 
+    flat_id: t.id, 
+    amount: args.amount, 
+    due_date: args.due_date, 
+    status: "pending", 
+    generated_at: now 
+  }));
+
+  // Perform a single bulk insert without returning all data (faster)
+  const { error: iErr } = await supabase.from("billing").insert(inserts, { count: "none" });
+  return iErr ? { count: 0, error: iErr.message } : { count: inserts.length, error: null };
+}
+
+export async function payBill(args: { bill_id: number | string }): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("billing").update({ status: "paid", paid_at: new Date().toISOString(), payment_method: "Simulated", transaction_id: `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}` }).eq("id", args.bill_id);
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function fetchRecentVisitors(limit: number): Promise<VisitorRow[]> {
-  const { data, error } = await supabase
-    .from("visitors")
-    .select("id, name, phone, flat_number, host_name, purpose, vehicle, check_in, check_out")
-    .order("check_in", { ascending: false })
-    .limit(limit);
-  if (error) return [];
-  return (data as VisitorRow[]) ?? [];
+  const { data, error } = await supabase.from("visitors").select("*").order("entry_time", { ascending: false }).limit(limit);
+  return error ? [] : (data as VisitorRow[]) ?? [];
+}
+
+export async function fetchVisitorsAll(): Promise<VisitorRow[]> {
+  const { data, error } = await supabase.from("visitors").select("*").order("entry_time", { ascending: false });
+  return error ? [] : (data as VisitorRow[]) ?? [];
 }
 
 export async function fetchNotices(limit: number): Promise<NoticeRow[]> {
-  const { data, error } = await supabase
-    .from("notices")
-    .select("*")
-    .order("published_at", { ascending: false })
-    .limit(limit);
-  if (error) return [];
-  return (data as NoticeRow[]) ?? [];
+  const { data, error } = await supabase.from("notices").select("*").order("published_at", { ascending: false }).limit(limit);
+  return error ? [] : (data as NoticeRow[]) ?? [];
 }
 
-export async function fetchResidentsDirectory(): Promise<
-  Array<ResidentRow & { flat_number: string; block_name: string }>
-> {
-  const { data: residents, error } = await supabase.from("residents").select("*").order("name");
-  if (error || !residents?.length) return [];
-  const flats = await supabase.from("flats").select("id, flat_number, block_id");
-  const blocks = await supabase.from("blocks").select("id, name, total_flats");
-  if (flats.error || blocks.error) return [];
-  const fmap = new Map(
-    (flats.data as Array<Pick<FlatRow, "id" | "flat_number" | "block_id">>).map((f) => [f.id, f]),
-  );
-  const bmap = new Map((blocks.data as BlockRow[]).map((b) => [b.id, b.name]));
-  return (residents as ResidentRow[]).map((r) => {
-    const f = fmap.get(r.flat_id);
-    return {
-      ...r,
-      flat_number: f?.flat_number ?? "",
-      block_name: f ? (bmap.get(f.block_id) ?? f.block_id) : "",
-    };
-  });
+export async function fetchResidentsDetailed(): Promise<Array<ResidentRow & { flat_number: string; block_name: string }>> {
+  const { data, error } = await supabase.from("residents").select(`*, flats:flat_id ( flat_number, blocks:block_id (name) )`).order("full_name");
+  if (error) return [];
+  return (data as any[]).map(r => ({ ...r, flat_number: r.flats?.flat_number || "N/A", block_name: r.flats?.blocks?.name || "N/A" }));
+}
+
+export async function fetchResidentsDirectory(): Promise<Array<ResidentRow & { flat_number: string; block_name: string }>> {
+  return fetchResidentsDetailed();
 }
 
 export async function fetchFlatsWithBlocks() {
-  const { data, error } = await supabase
-    .from("flats")
-    .select(`
-      id,
-      block_id,
-      flat_number,
-      floor,
-      sqft,
-      owner_name,
-      status,
-      blocks!inner (
-        id,
-        name
-      )
-    `);
-
-  if (error) {
-    console.error("Supabase error:", error);
-    return [];
-  }
-
-  return data;
+  const { data, error } = await supabase.from("flats").select(`*, blocks:block_id (id, name)`);
+  return error ? [] : data;
 }
 
-
-
-export async function insertFlat(args: {
-  block_id: string;
-  flat_number: string;
-  floor: number | null;
-  sqft: number | null;
-  owner_name?: string | null;
-  type?: string | null;
-}) {
-  const { error } = await supabase.from("flats").insert({
-    block_id: args.block_id,
-    flat_number: args.flat_number,
-    floor: args.floor,
-    sqft: args.sqft,
-    type: args.type ?? null,
-    status: "vacant",
-    owner_name: args.owner_name ?? null,
-  });
-
-  if (error) {
-    console.error("insertFlat error:", error.message);
-    return { error: error.message };
-  }
-
-  return { error: null };
+export async function insertFlat(args: { block_id: string; flat_number: string; floor: number | null; sqft: number | null; owner_name?: string | null; type?: string | null; }) {
+  const { error } = await supabase.from("flats").insert({ block_id: args.block_id, flat_number: args.flat_number, floor: args.floor, sqft: args.sqft, type: args.type ?? null, status: "vacant", owner_name: args.owner_name ?? null });
+  return error ? { error: error.message } : { error: null };
 }
 
-/** Accepts DB columns; maps legacy `occupancy_status` → `status`. */
-export async function updateFlat(
-  id: string,
-  args: Partial<Pick<FlatRow, "block_id" | "flat_number" | "floor" | "sqft" | "type" | "status" | "owner_name">> & {
-    occupancy_status?: string;
-  },
-): Promise<{ error: string | null }> {
-  const payload: Record<string, unknown> = {};
-  if (args.block_id !== undefined) payload.block_id = args.block_id;
-  if (args.flat_number !== undefined) payload.flat_number = args.flat_number;
-  if (args.floor !== undefined) payload.floor = args.floor;
-  if (args.sqft !== undefined) payload.sqft = args.sqft;
-  if (args.type !== undefined) payload.type = args.type;
-  if (args.owner_name !== undefined) payload.owner_name = args.owner_name;
-  if (args.status !== undefined) payload.status = String(args.status).toLowerCase();
-  if (args.occupancy_status !== undefined) payload.status = String(args.occupancy_status).toLowerCase();
-
+export async function updateFlat(id: string, args: Partial<FlatRow>): Promise<{ error: string | null }> {
+  const payload: any = { ...args };
+  if (payload.status) payload.status = String(payload.status).toLowerCase();
   const { error } = await supabase.from("flats").update(payload).eq("id", id);
-  if (error) return { error: error.message };
-  return { error: null };
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function deleteFlat(id: string): Promise<{ error: string | null }> {
   const { error } = await supabase.from("flats").delete().eq("id", id);
-  if (error) return { error: error.message };
-  return { error: null };
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function fetchComplaintsAll(): Promise<ComplaintRow[]> {
-  const { data, error } = await supabase
-    .from("complaints")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) return [];
-  return (data as ComplaintRow[]) ?? [];
+  const { data, error } = await supabase.from("complaints").select("*").order("created_at", { ascending: false });
+  return error ? [] : (data as ComplaintRow[]) ?? [];
 }
 
-export async function fetchVisitorsAll(): Promise<VisitorRow[]> {
-  const { data, error } = await supabase
-    .from("visitors")
-    .select("*")
-    .order("check_in", { ascending: false });
-  if (error) return [];
-  return (data as VisitorRow[]) ?? [];
+export async function fetchComplaintsForResident(residentId: string): Promise<ComplaintRow[]> {
+  const { data, error } = await supabase.from("complaints").select("*").eq("resident_id", residentId).order("created_at", { ascending: false });
+  return error ? [] : (data as ComplaintRow[]) ?? [];
 }
 
-export async function fetchBillsAll(): Promise<BillRow[]> {
-  const { data, error } = await supabase
-    .from("bills")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) return [];
-  return (data as BillRow[]) ?? [];
+export async function createComplaint(args: { resident_id: string; title: string; body: string; priority?: string; category?: string; }): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("complaints").insert({ resident_id: args.resident_id, title: args.title, description: args.body, status: "open", category: args.category || "General", priority: (args.priority || "medium").toLowerCase() });
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function updateComplaintStatus(id: string, status: string): Promise<{ error: string | null }> {
+  const dbStatus = status === "pending" ? "open" : status === "in-progress" ? "in_progress" : status;
+  const { error } = await supabase.from("complaints").update({ status: dbStatus, updated_at: new Date().toISOString() }).eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function fetchMyProfile(): Promise<(ResidentRow & { flat_number: string; block_name: string; floor: number; sqft: number; type: string; owner_name: string }) | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data: resident, error } = await supabase.from("residents").select(`*, flats:flat_id ( id, flat_number, floor, sqft, type, owner_name, blocks:block_id (name) )`).eq("user_id", user.id).single();
+  if (error || !resident) return null;
+  const f = (resident as any).flats;
+  return { ...(resident as ResidentRow), flat_number: f?.flat_number ?? "N/A", block_name: f?.blocks?.name ?? "N/A", floor: f?.floor ?? 0, sqft: f?.sqft ?? 0, type: f?.type ?? "Not specified", owner_name: f?.owner_name ?? "—" };
+}
+
+export async function updateMyProfile(args: Partial<ResidentRow>): Promise<{ error: string | null }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const { error } = await supabase.from("residents").update(args).eq("user_id", user.id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function deleteResident(id: string, flatId?: string): Promise<{ error: string | null }> {
+  if (flatId) await supabase.from("flats").update({ status: "vacant", owner_name: null }).eq("id", flatId);
+  const { error } = await supabase.from("residents").delete().eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function updateResident(id: string, args: Partial<ResidentRow>): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("residents").update(args).eq("id", id);
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function fetchParkingAll(): Promise<ParkingSlotRow[]> {
-  const { data, error } = await supabase.from("parking_slots").select("*");
-  if (error) return [];
-  return (data as ParkingSlotRow[]) ?? [];
+  const { data, error } = await supabase.from("parking").select("*");
+  return error ? [] : (data as ParkingSlotRow[]) ?? [];
 }
 
 export async function fetchMaintenanceAssets(): Promise<MaintenanceAssetRow[]> {
   const { data, error } = await supabase.from("maintenance_assets").select("*").order("id");
-  if (error) return [];
-  return (data as MaintenanceAssetRow[]) ?? [];
-}
-
-export async function fetchComplaintsForResident(residentId: string): Promise<ComplaintRow[]> {
-  const { data, error } = await supabase
-    .from("complaints")
-    .select("*")
-    .eq("resident_id", residentId)
-    .order("created_at", { ascending: false });
-  if (error) return [];
-  return (data as ComplaintRow[]) ?? [];
-}
-
-export async function fetchBillsForResident(residentId: string): Promise<BillRow[]> {
-  const { data, error } = await supabase
-    .from("bills")
-    .select("*")
-    .eq("resident_id", residentId)
-    .order("created_at", { ascending: false });
-  if (error) return [];
-  return (data as BillRow[]) ?? [];
-}
-
-export async function insertComplaint(args: {
-  residentId: string;
-  title: string;
-  body?: string;
-  flatLabel: string;
-}): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("complaints").insert({
-    resident_id: args.residentId,
-    title: args.title,
-    body: args.body ?? null,
-    flat_label: args.flatLabel,
-    status: "open",
-  });
-  if (error) return { error: error.message };
-  return { error: null };
-}
-
-export async function insertVisitor(args: {
-  name: string;
-  phone?: string;
-  flatNumber: string;
-  hostName?: string;
-  purpose: string;
-  vehicle?: string;
-}): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("visitors").insert({
-    name: args.name,
-    phone: args.phone ?? null,
-    flat_number: args.flatNumber,
-    host_name: args.hostName ?? null,
-    purpose: args.purpose,
-    vehicle: args.vehicle ?? null,
-  });
-  if (error) return { error: error.message };
-  return { error: null };
+  return error ? [] : (data as MaintenanceAssetRow[]) ?? [];
 }
 
 export async function checkoutVisitor(id: string): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("visitors")
-    .update({ check_out: new Date().toISOString() })
-    .eq("id", id);
-  if (error) return { error: error.message };
-  return { error: null };
+  const { error } = await supabase.from("visitors").update({ exit_time: new Date().toISOString() }).eq("id", id);
+  return error ? { error: error.message } : { error: null };
 }
 
-export async function markBillPaid(id: string): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("bills")
-    .update({ status: "paid", paid_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) return { error: error.message };
-  return { error: null };
+export async function insertVisitor(args: { name: string; phone: string; flat_id: string; purpose: string; vehicle_number?: string; }): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("visitors").insert({ name: args.name, phone: args.phone, flat_id: args.flat_id, purpose: args.purpose, vehicle_number: args.vehicle_number ?? null, entry_time: new Date().toISOString() });
+  return error ? { error: error.message } : { error: null };
 }
-
-
-
-
-
-

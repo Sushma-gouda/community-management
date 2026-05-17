@@ -184,9 +184,9 @@ function AdminDashboard() {
                         <td className="px-2 py-3 font-medium">{c.id}</td>
                         <td className="px-2 py-3">{c.title}</td>
                         <td className="px-2 py-3 text-foreground/80">
-                          {c.resident_id?.substring(0, 8)}
+                          {String(c.resident_id || "").substring(0, 8)}
                         </td>
-                        <td className="px-2 py-3 text-foreground/80">{c.flat_label}</td>
+                        <td className="px-2 py-3 text-foreground/80">{c.flat_id || "—"}</td>
                         <td className="px-2 py-3">
                           <Badge
                             tone={
@@ -238,7 +238,7 @@ function AdminDashboard() {
                       {p.label} · ₹{p.amount}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
-                      {p.id} · {new Date(p.created_at).toLocaleDateString()}
+                      {p.id} · {new Date(p.generated_at).toLocaleDateString()}
                     </div>
                   </div>
                   <Badge tone={p.status === "paid" ? "success" : "warning"}>{p.status}</Badge>

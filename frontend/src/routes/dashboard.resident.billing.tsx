@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   FileText,
   CreditCard,
@@ -8,10 +8,13 @@ import {
   Clock,
   AlertTriangle,
   Download,
+  Loader2,
 } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
 import { FilterPill, PageHeader } from "@/components/dashboard/PageHeader";
+import { useAuth } from "@/context/AuthContext";
+import { fetchBillsForResident, payBill, fetchMyProfile } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/billing")({
   head: () => ({ meta: [{ title: "Billing — Communa" }] }),
@@ -27,91 +30,84 @@ type Bill = {
   status: BillStatus;
   type: string;
   paidOn?: string;
+  raw_id: number | string;
 };
 
-const bills: Bill[] = [
-  {
-    id: "INV-9821",
-    month: "May 2026",
-    amount: 4500,
-    due: "May 30, 2026",
-    status: "Pending",
-    type: "Maintenance",
-  },
-  {
-    id: "INV-9810",
-    month: "April 2026",
-    amount: 4500,
-    due: "Apr 30, 2026",
-    status: "Paid",
-    type: "Maintenance",
-    paidOn: "Apr 28, 2026",
-  },
-  {
-    id: "INV-9799",
-    month: "March 2026",
-    amount: 4500,
-    due: "Mar 30, 2026",
-    status: "Paid",
-    type: "Maintenance",
-    paidOn: "Mar 27, 2026",
-  },
-  {
-    id: "INV-9788",
-    month: "February 2026",
-    amount: 4500,
-    due: "Feb 28, 2026",
-    status: "Paid",
-    type: "Maintenance",
-    paidOn: "Feb 25, 2026",
-  },
-  {
-    id: "INV-9777",
-    month: "January 2026",
-    amount: 4500,
-    due: "Jan 31, 2026",
-    status: "Paid",
-    type: "Maintenance",
-    paidOn: "Jan 29, 2026",
-  },
-  {
-    id: "INV-9766",
-    month: "December 2025",
-    amount: 5200,
-    due: "Dec 31, 2025",
-    status: "Paid",
-    type: "Maintenance + Repair",
-    paidOn: "Dec 28, 2025",
-  },
-  {
-    id: "INV-9755",
-    month: "November 2025",
-    amount: 4500,
-    due: "Nov 30, 2025",
-    status: "Paid",
-    type: "Maintenance",
-    paidOn: "Nov 27, 2025",
-  },
-];
+const statusMap: Record<string, BillStatus> = {
+  paid: "Paid",
+  pending: "Pending",
+  overdue: "Overdue",
+};
 
 function ResidentBilling() {
+  const { residentHome, initialized } = useAuth();
+  const [data, setData] = useState<Bill[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"All" | BillStatus>("All");
   const [payModal, setPayModal] = useState<Bill | null>(null);
   const [payStep, setPayStep] = useState<"form" | "success">("form");
 
-  const filtered = bills.filter((b) => filter === "All" || b.status === filter);
+  async function loadData() {
+    let flatId = residentHome?.flat.id;
+    
+    if (!flatId && initialized) {
+      const profile = await fetchMyProfile();
+      if (profile && profile.flat_id) flatId = profile.flat_id;
+    }
+
+    if (!flatId) return;
+
+    setLoading(true);
+    try {
+      const rows = await fetchBillsForResident(flatId);
+      const mapped = rows.map((r) => ({
+        id: `INV-${String(r.id).slice(0, 4).toUpperCase()}`,
+        raw_id: r.id,
+        month: r.generated_at ? new Date(r.generated_at).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "N/A",
+        amount: Number(r.amount),
+        due: r.due_date ? new Date(r.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A",
+        status: statusMap[r.status] || "Pending",
+        type: "Maintenance", // Default since 'label' is missing in schema
+        paidOn: r.paid_at ? new Date(r.paid_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined,
+      }));
+      setData(mapped);
+    } catch (err) {
+      console.error("Error loading bills:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (initialized) {
+      loadData();
+    }
+  }, [initialized, residentHome]);
+
+  const filtered = data.filter((b) => filter === "All" || b.status === filter);
   const tone = (s: BillStatus) =>
     s === "Paid" ? "success" : s === "Pending" ? "warning" : "danger";
 
-  const pending = bills.filter((b) => b.status === "Pending");
-  const totalPaid = bills.filter((b) => b.status === "Paid").reduce((s, b) => s + b.amount, 0);
+  const pendingCount = data.filter((b) => b.status === "Pending" || b.status === "Overdue");
+  const totalPaid = data
+    .filter((b) => b.status === "Paid" && b.paidOn && !isNaN(new Date(b.paidOn).getTime()) && new Date(b.paidOn).getFullYear() === new Date().getFullYear())
+    .reduce((s, b) => s + b.amount, 0);
 
-  const handlePay = () => {
-    setPayStep("success");
-    setTimeout(() => {
-      setPayModal(null);
-      setPayStep("form");
-    }, 2000);
+  const handlePay = async () => {
+    if (!payModal) return;
+    
+    const { error } = await payBill({ bill_id: payModal.raw_id });
+
+    if (error) {
+      alert("Payment failed: " + error);
+    } else {
+      setPayStep("success");
+      setTimeout(() => {
+        setPayModal(null);
+        setPayStep("form");
+        loadData();
+      }, 2000);
+    }
   };
 
   return (
@@ -119,156 +115,170 @@ function ResidentBilling() {
       <div className="space-y-6 animate-fade-up">
         <PageHeader title="Billing & Payments" subtitle="View and pay your maintenance bills." />
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="rounded-2xl glass shadow-card p-5 bg-gradient-to-br from-[color:var(--warning)]/20 to-[color:var(--warning)]/5">
-            <div className="text-xs text-muted-foreground">Pending</div>
-            <div className="mt-2 text-2xl font-semibold text-[color:var(--warning)]">
-              ₹{pending.reduce((s, b) => s + b.amount, 0).toLocaleString()}
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-1">
-              {pending.length} bill(s) due
-            </div>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4 glass rounded-2xl">
+            <Loader2 className="h-10 w-10 text-primary animate-spin" />
+            <p className="text-muted-foreground font-medium">Syncing payment records...</p>
           </div>
-          <div className="rounded-2xl glass shadow-card p-5 bg-gradient-to-br from-[color:var(--success)]/20 to-[color:var(--success)]/5">
-            <div className="text-xs text-muted-foreground">Total Paid (2026)</div>
-            <div className="mt-2 text-2xl font-semibold text-[color:var(--success)]">
-              ₹{totalPaid.toLocaleString()}
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-1">
-              {bills.filter((b) => b.status === "Paid").length} bills paid
-            </div>
-          </div>
-          <div className="rounded-2xl glass shadow-card p-5">
-            <div className="text-xs text-muted-foreground">Monthly Charge</div>
-            <div className="mt-2 text-2xl font-semibold">₹4,500</div>
-            <div className="text-[11px] text-muted-foreground mt-1">Maintenance fee</div>
-          </div>
-          <div className="rounded-2xl glass shadow-card p-5">
-            <div className="text-xs text-muted-foreground">Payment Rate</div>
-            <div className="mt-2 text-2xl font-semibold">100%</div>
-            <div className="text-[11px] text-muted-foreground mt-1">On-time payments</div>
-          </div>
-        </div>
-
-        {/* Pending bills */}
-        {pending.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Pending Bills
-            </h2>
-            {pending.map((b) => (
-              <div
-                key={b.id}
-                className="rounded-2xl glass shadow-card p-5 border border-[color:var(--warning)]/30 bg-gradient-to-r from-[color:var(--warning)]/5 to-transparent"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="grid place-items-center h-12 w-12 rounded-xl bg-[color:var(--warning)]/15 text-[color:var(--warning)] shrink-0">
-                      <AlertTriangle className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <div className="font-semibold">
-                        {b.month} — {b.type}
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-0.5">
-                        {b.id} · Due: {b.due}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <div className="text-xl font-semibold">₹{b.amount.toLocaleString()}</div>
-                      <Badge tone="warning">Pending</Badge>
-                    </div>
-                    <button
-                      onClick={() => setPayModal(b)}
-                      className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
-                    >
-                      Pay Now
-                    </button>
-                  </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="rounded-2xl glass shadow-card p-5 bg-gradient-to-br from-[color:var(--warning)]/20 to-[color:var(--warning)]/5">
+                <div className="text-xs text-muted-foreground">Pending</div>
+                <div className="mt-2 text-2xl font-semibold text-[color:var(--warning)]">
+                  ₹{pendingCount.reduce((s, b) => s + b.amount, 0).toLocaleString()}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {pendingCount.length} bill(s) due
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* All bills table */}
-        <Card
-          title="Payment History"
-          action={
-            <div className="flex items-center gap-2">
-              <button className="inline-flex h-8 px-3 items-center gap-1.5 rounded-lg glass text-xs font-medium hover:bg-foreground/5 transition">
-                <Download className="h-3.5 w-3.5" /> Export
-              </button>
+              <div className="rounded-2xl glass shadow-card p-5 bg-gradient-to-br from-[color:var(--success)]/20 to-[color:var(--success)]/5">
+                <div className="text-xs text-muted-foreground">Total Paid ({new Date().getFullYear()})</div>
+                <div className="mt-2 text-2xl font-semibold text-[color:var(--success)]">
+                  ₹{totalPaid.toLocaleString()}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {data.filter((b) => b.status === "Paid").length} bills paid
+                </div>
+              </div>
+              <div className="rounded-2xl glass shadow-card p-5">
+                <div className="text-xs text-muted-foreground">Monthly Charge</div>
+                <div className="mt-2 text-2xl font-semibold">₹4,500</div>
+                <div className="text-[11px] text-muted-foreground mt-1">Maintenance fee</div>
+              </div>
+              <div className="rounded-2xl glass shadow-card p-5">
+                <div className="text-xs text-muted-foreground">Payment Rate</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {data.length > 0 ? Math.round((data.filter(b => b.status === "Paid").length / data.length) * 100) : 100}%
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">On-time payments</div>
+              </div>
             </div>
-          }
-        >
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            {(["All", "Paid", "Pending", "Overdue"] as const).map((s) => (
-              <FilterPill key={s} active={filter === s} onClick={() => setFilter(s)}>
-                {s}
-              </FilterPill>
-            ))}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground border-b border-border">
-                  <th className="px-2 py-2 font-medium">Invoice</th>
-                  <th className="px-2 py-2 font-medium">Month</th>
-                  <th className="px-2 py-2 font-medium">Type</th>
-                  <th className="px-2 py-2 font-medium">Amount</th>
-                  <th className="px-2 py-2 font-medium">Due Date</th>
-                  <th className="px-2 py-2 font-medium">Paid On</th>
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((b) => (
-                  <tr
-                    key={b.id}
-                    className="border-b border-border last:border-0 hover:bg-foreground/[0.02]"
+
+            {pendingCount.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                  Pending Bills
+                </h2>
+                {pendingCount.map((b) => (
+                  <div
+                    key={b.raw_id}
+                    className="rounded-2xl glass shadow-card p-5 border border-[color:var(--warning)]/30 bg-gradient-to-r from-[color:var(--warning)]/5 to-transparent"
                   >
-                    <td className="px-2 py-3 font-medium">
-                      <div className="flex items-center gap-2">
-                        <span className="grid place-items-center h-7 w-7 rounded-md bg-primary/10 text-primary">
-                          <FileText className="h-3.5 w-3.5" />
-                        </span>
-                        {b.id}
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="grid place-items-center h-12 w-12 rounded-xl bg-[color:var(--warning)]/15 text-[color:var(--warning)] shrink-0">
+                          <AlertTriangle className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <div className="font-semibold">
+                            {b.month} — {b.type}
+                          </div>
+                          <div className="text-sm text-muted-foreground mt-0.5">
+                            {b.id} · Due: {b.due}
+                          </div>
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-2 py-3">{b.month}</td>
-                    <td className="px-2 py-3 text-foreground/70">{b.type}</td>
-                    <td className="px-2 py-3 font-semibold">₹{b.amount.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-foreground/70">{b.due}</td>
-                    <td className="px-2 py-3 text-foreground/70">{b.paidOn ?? "—"}</td>
-                    <td className="px-2 py-3">
-                      <Badge tone={tone(b.status)}>{b.status}</Badge>
-                    </td>
-                    <td className="px-2 py-3 text-right">
-                      {b.status === "Paid" ? (
-                        <button className="text-xs text-primary hover:underline">Receipt</button>
-                      ) : (
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <div className="text-xl font-semibold">₹{b.amount.toLocaleString()}</div>
+                          <Badge tone={b.status === "Overdue" ? "danger" : "warning"}>{b.status}</Badge>
+                        </div>
                         <button
                           onClick={() => setPayModal(b)}
-                          className="text-xs px-3 py-1.5 rounded-md bg-[image:var(--gradient-primary)] text-white font-medium"
+                          className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
                         >
-                          Pay
+                          Pay Now
                         </button>
-                      )}
-                    </td>
-                  </tr>
+                      </div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+              </div>
+            )}
+
+            <Card
+              title="Payment History"
+              action={
+                <div className="flex items-center gap-2">
+                  <button className="inline-flex h-8 px-3 items-center gap-1.5 rounded-lg glass text-xs font-medium hover:bg-foreground/5 transition">
+                    <Download className="h-3.5 w-3.5" /> Export
+                  </button>
+                </div>
+              }
+            >
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                {(["All", "Paid", "Pending", "Overdue"] as const).map((s) => (
+                  <FilterPill key={s} active={filter === s} onClick={() => setFilter(s)}>
+                    {s}
+                  </FilterPill>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                      <th className="px-2 py-2 font-medium">Invoice</th>
+                      <th className="px-2 py-2 font-medium">Month</th>
+                      <th className="px-2 py-2 font-medium">Type</th>
+                      <th className="px-2 py-2 font-medium">Amount</th>
+                      <th className="px-2 py-2 font-medium">Due Date</th>
+                      <th className="px-2 py-2 font-medium">Paid On</th>
+                      <th className="px-2 py-2 font-medium">Status</th>
+                      <th className="px-2 py-2 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((b) => (
+                      <tr
+                        key={b.raw_id}
+                        className="border-b border-border last:border-0 hover:bg-foreground/[0.02]"
+                      >
+                        <td className="px-2 py-3 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span className="grid place-items-center h-7 w-7 rounded-md bg-primary/10 text-primary">
+                              <FileText className="h-3.5 w-3.5" />
+                            </span>
+                            {b.id}
+                          </div>
+                        </td>
+                        <td className="px-2 py-3">{b.month}</td>
+                        <td className="px-2 py-3 text-foreground/70">{b.type}</td>
+                        <td className="px-2 py-3 font-semibold">₹{b.amount.toLocaleString()}</td>
+                        <td className="px-2 py-3 text-foreground/70">{b.due}</td>
+                        <td className="px-2 py-3 text-foreground/70">{b.paidOn ?? "—"}</td>
+                        <td className="px-2 py-3">
+                          <Badge tone={tone(b.status)}>{b.status}</Badge>
+                        </td>
+                        <td className="px-2 py-3 text-right">
+                          {b.status === "Paid" ? (
+                            <button className="text-xs text-primary hover:underline">Receipt</button>
+                          ) : (
+                            <button
+                              onClick={() => setPayModal(b)}
+                              className="text-xs px-3 py-1.5 rounded-md bg-[image:var(--gradient-primary)] text-white font-medium"
+                            >
+                              Pay
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="py-10 text-center text-muted-foreground">
+                          No billing records found.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </>
+        )}
       </div>
 
-      {/* Payment modal */}
       {payModal && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 animate-fade-in">
           <div

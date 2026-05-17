@@ -1,9 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { type LucideIcon, Search, UserPlus, Mail, Phone, Building2, X } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { type LucideIcon, Search, UserPlus, Mail, Phone, Building2, X, Trash2, Pencil } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
-import { FilterPill, PageHeader, PrimaryButton } from "@/components/dashboard/PageHeader";
+import { FilterPill, PageHeader, PrimaryButton, Modal, Field, TextInput, SelectInput, GhostButton } from "@/components/dashboard/PageHeader";
+import { 
+  fetchResidentsDirectory, 
+  updateResident, 
+  deleteResident, 
+  fetchBlocks, 
+  fetchVacantFlatsByBlock,
+  registerResidentRpc 
+} from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/admin/residents")({
   head: () => ({ meta: [{ title: "Residents — Communa Admin" }] }),
@@ -20,81 +28,78 @@ type Resident = {
   status: "Active" | "Inactive";
   since: string;
   family: number;
+  flat_id: string; // Internal ID for updates
 };
 
-const data: Resident[] = [
-  {
-    id: "1",
-    name: "Ravi Kumar",
-    email: "ravi@mail.com",
-    phone: "+91 98200 11223",
-    flat: "A-101",
-    block: "A",
-    status: "Active",
-    since: "Jan 2022",
-    family: 4,
-  },
-  {
-    id: "2",
-    name: "Priya Mehta",
-    email: "priya@mail.com",
-    phone: "+91 98200 22334",
-    flat: "A-204",
-    block: "A",
-    status: "Active",
-    since: "Mar 2021",
-    family: 3,
-  },
-  {
-    id: "3",
-    name: "Anika Sharma",
-    email: "anika@mail.com",
-    phone: "+91 98200 33445",
-    flat: "B-302",
-    block: "B",
-    status: "Active",
-    since: "Aug 2023",
-    family: 2,
-  },
-  {
-    id: "4",
-    name: "Sunil Joshi",
-    email: "sunil@mail.com",
-    phone: "+91 98200 44556",
-    flat: "C-105",
-    block: "C",
-    status: "Inactive",
-    since: "Feb 2020",
-    family: 5,
-  },
-  {
-    id: "5",
-    name: "Meera Pillai",
-    email: "meera@mail.com",
-    phone: "+91 98200 55667",
-    flat: "C-204",
-    block: "C",
-    status: "Active",
-    since: "Nov 2022",
-    family: 3,
-  },
-  {
-    id: "6",
-    name: "Arjun Rao",
-    email: "arjun@mail.com",
-    phone: "+91 98200 66778",
-    flat: "D-405",
-    block: "D",
-    status: "Active",
-    since: "Jun 2024",
-    family: 2,
-  },
-];
-
 function ResidentsPage() {
+  const [data, setData] = useState<Resident[]>([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [block, setBlock] = useState("All");
   const [selected, setSelected] = useState<Resident | null>(null);
+  
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [blocksList, setBlocksList] = useState<any[]>([]);
+  const [availableFlats, setAvailableFlats] = useState<any[]>([]);
+  const [flatsLoading, setFlatsLoading] = useState(false);
+
+  const [form, setForm] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    block_id: "",
+    flat_id: "",
+    family_count: 1
+  });
+
+  async function load() {
+    setLoading(true);
+    try {
+      const rows = await fetchResidentsDirectory();
+      setData(
+        rows.map((r) => ({
+          id: r.id,
+          name: r.full_name,
+          email: r.email,
+          phone: r.phone || "—",
+          flat: r.flat_number,
+          block: r.block_name,
+          status: "Active",
+          since: r.created_at ? new Date(r.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—",
+          family: r.family_count || 0,
+          flat_id: r.flat_id
+        }))
+      );
+      const b = await fetchBlocks();
+      setBlocksList(b);
+    } catch (err) {
+      console.error("Error loading residents:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Fetch flats when block changes in Add Modal
+  useEffect(() => {
+    if (form.block_id) {
+      setFlatsLoading(true);
+      fetchVacantFlatsByBlock(form.block_id)
+        .then(setAvailableFlats)
+        .finally(() => setFlatsLoading(false));
+    } else {
+      setAvailableFlats([]);
+    }
+  }, [form.block_id]);
+
+  const blockOptions = useMemo(() => {
+    const b = new Set(data.map(r => r.block));
+    return ["All", ...Array.from(b).sort()];
+  }, [data]);
 
   const filtered = useMemo(
     () =>
@@ -103,10 +108,66 @@ function ResidentsPage() {
           !q ||
           r.name.toLowerCase().includes(q.toLowerCase()) ||
           r.flat.toLowerCase().includes(q.toLowerCase());
-        return matchQ && (block === "All" || r.block === block);
+        const matchB = block === "All" || r.block === block;
+        return matchQ && matchB;
       }),
-    [q, block],
+    [data, q, block],
   );
+
+  const handleAddResident = async () => {
+    if (!form.full_name || !form.email || !form.flat_id) return alert("Please fill required fields");
+    
+    const { error } = await registerResidentRpc({
+      flatId: form.flat_id,
+      fullName: form.full_name,
+      email: form.email,
+      phone: form.phone,
+      familyCount: form.family_count
+    });
+
+    if (error) {
+      alert("Error: " + error);
+    } else {
+      setIsAddModalOpen(false);
+      setForm({ full_name: "", email: "", phone: "", block_id: "", flat_id: "", family_count: 1 });
+      load();
+    }
+  };
+
+  const handleDelete = async (r: Resident) => {
+    if (!confirm(`Are you sure you want to remove ${r.name}? This will also mark flat ${r.flat} as vacant.`)) return;
+    
+    const { error } = await deleteResident(r.id, r.flat_id);
+    if (error) {
+      alert("Error deleting: " + error);
+    } else {
+      setSelected(null);
+      load();
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!selected) return;
+    if (!form.full_name || !form.email) return alert("Name and Email are required");
+
+    console.log("[Residents] Updating resident:", selected.id, form);
+    
+    const { error } = await updateResident(selected.id, {
+      full_name: form.full_name,
+      email: form.email,
+      phone: form.phone,
+      family_count: form.family_count || 1
+    });
+
+    if (error) {
+      alert("Error updating: " + error);
+    } else {
+      console.log("[Residents] Update successful");
+      setIsEditModalOpen(false);
+      setSelected(null);
+      await load();
+    }
+  };
 
   return (
     <DashboardLayout role="Admin" items={adminNav}>
@@ -115,7 +176,7 @@ function ResidentsPage() {
           title="Residents"
           subtitle="Directory of all residents across the community."
           actions={
-            <PrimaryButton>
+            <PrimaryButton onClick={() => setIsAddModalOpen(true)}>
               <UserPlus className="h-4 w-4" /> Add Resident
             </PrimaryButton>
           }
@@ -136,77 +197,83 @@ function ResidentsPage() {
           }
         >
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            {["All", "A", "B", "C", "D"].map((b) => (
+            {blockOptions.map((b) => (
               <FilterPill key={b} active={block === b} onClick={() => setBlock(b)}>
-                Block {b}
+                {b === "All" ? "All Blocks" : `Block ${b}`}
               </FilterPill>
             ))}
           </div>
 
-          {/* Mobile cards */}
-          <div className="grid sm:hidden gap-3">
-            {filtered.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => setSelected(r)}
-                className="text-left p-4 rounded-xl glass hover:shadow-card transition"
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar name={r.name} />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium">{r.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {r.flat} · Block {r.block}
-                    </div>
-                  </div>
-                  <Badge tone={r.status === "Active" ? "success" : "muted"}>{r.status}</Badge>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground border-b border-border">
-                  <th className="px-2 py-2 font-medium">Name</th>
-                  <th className="px-2 py-2 font-medium">Email</th>
-                  <th className="px-2 py-2 font-medium">Phone</th>
-                  <th className="px-2 py-2 font-medium">Flat</th>
-                  <th className="px-2 py-2 font-medium">Block</th>
-                  <th className="px-2 py-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
+          {loading ? (
+            <div className="py-20 text-center text-muted-foreground">Loading residents...</div>
+          ) : (
+            <>
+              {/* Mobile cards */}
+              <div className="grid sm:hidden gap-3">
                 {filtered.map((r) => (
-                  <tr
+                  <button
                     key={r.id}
                     onClick={() => setSelected(r)}
-                    className="border-b border-border last:border-0 hover:bg-foreground/[0.03] cursor-pointer"
+                    className="text-left p-4 rounded-xl glass hover:shadow-card transition"
                   >
-                    <td className="px-2 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={r.name} />
-                        <span className="font-medium">{r.name}</span>
+                    <div className="flex items-center gap-3">
+                      <Avatar name={r.name} />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium">{r.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {r.flat} · Block {r.block}
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-2 py-3 text-foreground/80">{r.email}</td>
-                    <td className="px-2 py-3 text-foreground/80">{r.phone}</td>
-                    <td className="px-2 py-3">{r.flat}</td>
-                    <td className="px-2 py-3">Block {r.block}</td>
-                    <td className="px-2 py-3">
                       <Badge tone={r.status === "Active" ? "success" : "muted"}>{r.status}</Badge>
-                    </td>
-                  </tr>
+                    </div>
+                  </button>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                      <th className="px-2 py-2 font-medium">Name</th>
+                      <th className="px-2 py-2 font-medium">Email</th>
+                      <th className="px-2 py-2 font-medium">Phone</th>
+                      <th className="px-2 py-2 font-medium">Flat</th>
+                      <th className="px-2 py-2 font-medium">Block</th>
+                      <th className="px-2 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((r) => (
+                      <tr
+                        key={r.id}
+                        onClick={() => setSelected(r)}
+                        className="border-b border-border last:border-0 hover:bg-foreground/[0.03] cursor-pointer transition"
+                      >
+                        <td className="px-2 py-3">
+                          <div className="flex items-center gap-3">
+                            <Avatar name={r.name} />
+                            <span className="font-medium">{r.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 text-foreground/80">{r.email}</td>
+                        <td className="px-2 py-3 text-foreground/80">{r.phone}</td>
+                        <td className="px-2 py-3">{r.flat}</td>
+                        <td className="px-2 py-3">Block {r.block}</td>
+                        <td className="px-2 py-3">
+                          <Badge tone={r.status === "Active" ? "success" : "muted"}>{r.status}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </Card>
       </div>
 
-      {/* Drawer */}
+      {/* Profile Drawer */}
       <div
         className={
           "fixed inset-0 z-50 transition " +
@@ -255,11 +322,28 @@ function ResidentsPage() {
                 <div className="space-y-2.5">
                   <Row icon={Mail} label="Email" value={selected.email} />
                   <Row icon={Phone} label="Phone" value={selected.phone} />
-                  <Row icon={Building2} label="Block" value={`Block ${selected.block}`} />
+                  <Row icon={Building2} label="Block" value={selected.block} />
                 </div>
                 <div className="pt-3 flex items-center gap-2">
-                  <PrimaryButton>Edit Profile</PrimaryButton>
-                  <button className="h-10 px-4 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10">
+                  <PrimaryButton onClick={() => {
+                    setForm({
+                      full_name: selected.name,
+                      email: selected.email,
+                      phone: selected.phone === "—" ? "" : selected.phone,
+                      block_id: "", // Not used for edit
+                      flat_id: selected.flat_id,
+                      family_count: selected.family
+                    });
+                    setIsEditModalOpen(true);
+                  }}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edit Profile
+                  </PrimaryButton>
+                  <button 
+                    onClick={() => handleDelete(selected)}
+                    className="h-10 px-4 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition flex items-center gap-2"
+                  >
+                    <Trash2 className="h-4 w-4" />
                     Remove
                   </button>
                 </div>
@@ -268,12 +352,120 @@ function ResidentsPage() {
           )}
         </aside>
       </div>
+
+      {/* Add Resident Modal */}
+      <Modal
+        open={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="Add New Resident"
+        footer={
+          <div className="flex gap-2">
+            <GhostButton onClick={() => setIsAddModalOpen(false)}>Cancel</GhostButton>
+            <PrimaryButton onClick={handleAddResident}>Add Resident</PrimaryButton>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4">
+          <Field label="Full Name">
+            <TextInput 
+              value={form.full_name} 
+              onChange={e => setForm({...form, full_name: e.target.value})} 
+              placeholder="e.g. John Doe"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Email">
+              <TextInput 
+                type="email"
+                value={form.email} 
+                onChange={e => setForm({...form, email: e.target.value})} 
+                placeholder="john@example.com"
+              />
+            </Field>
+            <Field label="Phone">
+              <TextInput 
+                value={form.phone} 
+                onChange={e => setForm({...form, phone: e.target.value})} 
+                placeholder="+91 ..."
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Block">
+              <SelectInput 
+                value={form.block_id} 
+                onChange={e => setForm({...form, block_id: e.target.value, flat_id: ""})}
+              >
+                <option value="">Select Block</option>
+                {blocksList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </SelectInput>
+            </Field>
+            <Field label="Flat (Vacant)">
+              <SelectInput 
+                disabled={!form.block_id || flatsLoading}
+                value={form.flat_id} 
+                onChange={e => setForm({...form, flat_id: e.target.value})}
+              >
+                <option value="">{flatsLoading ? "Loading..." : "Select Flat"}</option>
+                {availableFlats.map(f => <option key={f.id} value={f.id}>{f.flat_number}</option>)}
+              </SelectInput>
+            </Field>
+          </div>
+          <Field label="Family Members">
+            <TextInput 
+              type="number"
+              min="1"
+              value={form.family_count || ""} 
+              onChange={e => {
+                const val = parseInt(e.target.value);
+                setForm({...form, family_count: isNaN(val) ? 0 : val});
+              }} 
+            />
+          </Field>
+        </div>
+      </Modal>
+
+      {/* Edit Resident Modal */}
+      <Modal
+        open={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title="Edit Resident Profile"
+        footer={
+          <div className="flex gap-2">
+            <GhostButton onClick={() => setIsEditModalOpen(false)}>Cancel</GhostButton>
+            <PrimaryButton onClick={handleUpdate}>Save Changes</PrimaryButton>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4">
+          <Field label="Full Name">
+            <TextInput value={form.full_name} onChange={e => setForm({...form, full_name: e.target.value})} />
+          </Field>
+          <Field label="Email">
+            <TextInput type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+          </Field>
+          <Field label="Phone">
+            <TextInput value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+          </Field>
+          <Field label="Family Members">
+            <TextInput 
+              type="number"
+              min="1"
+              value={form.family_count || ""} 
+              onChange={e => {
+                const val = parseInt(e.target.value);
+                setForm({...form, family_count: isNaN(val) ? 0 : val});
+              }} 
+            />
+          </Field>
+        </div>
+      </Modal>
     </DashboardLayout>
   );
 }
 
 function Avatar({ name, size = "md" }: { name: string; size?: "md" | "lg" }) {
-  const initials = name
+  const initials = (name || "?")
     .split(" ")
     .map((n) => n[0])
     .slice(0, 2)

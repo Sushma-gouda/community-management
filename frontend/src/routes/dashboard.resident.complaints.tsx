@@ -1,9 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Plus, X, Clock, CheckCircle2, AlertCircle, Circle, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, X, Clock, CheckCircle2, AlertCircle, ChevronRight } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
 import { FilterPill, PageHeader } from "@/components/dashboard/PageHeader";
+import { 
+  fetchMyProfile, 
+  fetchComplaintsForResident, 
+  createComplaint, 
+  type ComplaintRow 
+} from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/complaints")({
   head: () => ({ meta: [{ title: "My Complaints — Communa" }] }),
@@ -14,6 +20,7 @@ type Status = "Open" | "In Progress" | "Resolved";
 type Priority = "Low" | "Medium" | "High" | "Critical";
 type Complaint = {
   id: string;
+  raw_id: string;
   title: string;
   desc: string;
   category: string;
@@ -23,57 +30,6 @@ type Complaint = {
   updated: string;
   timeline: { label: string; date: string; done: boolean }[];
 };
-
-const seed: Complaint[] = [
-  {
-    id: "C-2041",
-    title: "Lift not working in Block B",
-    desc: "The lift between floors 1 and 5 has been stuck since morning. Elderly residents are facing difficulty.",
-    category: "Elevator",
-    status: "Open",
-    priority: "Critical",
-    created: "May 9, 2026",
-    updated: "2 hours ago",
-    timeline: [
-      { label: "Complaint Raised", date: "May 9, 09:30 AM", done: true },
-      { label: "Acknowledged", date: "May 9, 10:00 AM", done: true },
-      { label: "Assigned to Technician", date: "Pending", done: false },
-      { label: "Resolved", date: "—", done: false },
-    ],
-  },
-  {
-    id: "C-2018",
-    title: "AC drainage issue in bedroom",
-    desc: "Water is dripping from the AC unit in the master bedroom. The wall is getting damp.",
-    category: "Plumbing",
-    status: "In Progress",
-    priority: "High",
-    created: "May 3, 2026",
-    updated: "1 day ago",
-    timeline: [
-      { label: "Complaint Raised", date: "May 3, 02:15 PM", done: true },
-      { label: "Acknowledged", date: "May 3, 03:00 PM", done: true },
-      { label: "Assigned to Technician", date: "May 4, 10:00 AM", done: true },
-      { label: "Resolved", date: "—", done: false },
-    ],
-  },
-  {
-    id: "C-1996",
-    title: "Intercom not working",
-    desc: "The intercom unit in the flat is not receiving calls from the gate.",
-    category: "Electrical",
-    status: "Resolved",
-    priority: "Medium",
-    created: "Apr 22, 2026",
-    updated: "Apr 25, 2026",
-    timeline: [
-      { label: "Complaint Raised", date: "Apr 22, 11:00 AM", done: true },
-      { label: "Acknowledged", date: "Apr 22, 11:30 AM", done: true },
-      { label: "Assigned to Technician", date: "Apr 23, 09:00 AM", done: true },
-      { label: "Resolved", date: "Apr 25, 04:00 PM", done: true },
-    ],
-  },
-];
 
 const categories = [
   "Elevator",
@@ -85,17 +41,101 @@ const categories = [
   "Other",
 ];
 
+const statusMap: Record<string, Status> = {
+  open: "Open",
+  in_progress: "In Progress",
+  resolved: "Resolved",
+};
+
+const prioMap: Record<string, Priority> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  critical: "Critical",
+};
+
+import { useAuth } from "@/context/AuthContext";
+
 function ResidentComplaints() {
-  const [data, setData] = useState(seed);
+  const { profile, initialized } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Complaint[]>([]);
   const [filter, setFilter] = useState<"All" | Status>("All");
   const [selected, setSelected] = useState<Complaint | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [residentId, setResidentId] = useState<string | null>(null);
+  const [flatLabel, setFlatLabel] = useState("");
+
   const [form, setForm] = useState({
     title: "",
     category: "Elevator",
     desc: "",
     priority: "Medium" as Priority,
   });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function loadInitialData() {
+    if (!profile || profile.role !== "resident") return;
+    
+    setLoading(true);
+    try {
+      // profile in AuthContext has the profile row, but we need the resident_id (the res-... id)
+      // fetchMyProfile returns exactly what we need
+      const myProfile = await fetchMyProfile();
+      if (myProfile) {
+        setResidentId(myProfile.id);
+        setFlatLabel(myProfile.flat_number);
+        await refreshComplaints(myProfile.id);
+      }
+    } catch (err) {
+      console.error("Error loading initial data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshComplaints(id: string) {
+    setRefreshing(true);
+    try {
+      const rows = await fetchComplaintsForResident(id);
+      const mapped = rows.map((r) => {
+        const s = statusMap[r.status] || "Open";
+        const p = prioMap[r.priority || "medium"] || "Medium";
+        const createdDate = new Date(r.created_at);
+        
+        return {
+          id: `C-${String(r.id).slice(0, 4).toUpperCase()}`,
+          raw_id: String(r.id),
+          title: r.title,
+          desc: r.description || "",
+          category: r.category || "General",
+          status: s,
+          priority: p,
+          created: createdDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          updated: "Just now", 
+          timeline: [
+            { label: "Complaint Raised", date: createdDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), done: true },
+            { label: "Acknowledged", date: s !== "Open" ? "Processed" : "Pending", done: s !== "Open" },
+            { label: "Assigned to Technician", date: s === "Resolved" || s === "In Progress" ? "Assigned" : "—", done: s === "Resolved" || s === "In Progress" },
+            { label: "Resolved", date: s === "Resolved" ? "Completed" : "—", done: s === "Resolved" },
+          ],
+        };
+      });
+      setData(mapped);
+    } catch (err) {
+      console.error("Error refreshing complaints:", err);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    if (initialized) {
+      loadInitialData();
+    }
+  }, [initialized]);
 
   const filtered = data.filter((c) => filter === "All" || c.status === filter);
 
@@ -113,27 +153,29 @@ function ResidentComplaints() {
       <AlertCircle className="h-4 w-4 text-[color:var(--warning)]" />
     );
 
-  const submit = () => {
-    if (!form.title.trim()) return;
-    const newC: Complaint = {
-      id: `C-${2042 + data.length}`,
+  const submit = async () => {
+    if (!form.title.trim()) return alert("Please enter a title");
+    if (!residentId) return alert("Resident profile not loaded. Please refresh the page.");
+    
+    setSubmitting(true);
+    const { error } = await createComplaint({
+      resident_id: residentId,
       title: form.title,
-      desc: form.desc,
+      body: form.desc,
+      flat_label: flatLabel,
       category: form.category,
-      status: "Open",
       priority: form.priority,
-      created: "Just now",
-      updated: "Just now",
-      timeline: [
-        { label: "Complaint Raised", date: "Just now", done: true },
-        { label: "Acknowledged", date: "Pending", done: false },
-        { label: "Assigned to Technician", date: "—", done: false },
-        { label: "Resolved", date: "—", done: false },
-      ],
-    };
-    setData([newC, ...data]);
-    setForm({ title: "", category: "Elevator", desc: "", priority: "Medium" });
-    setShowForm(false);
+    });
+
+    if (error) {
+      setSubmitting(false);
+      alert("Error submitting complaint: " + error);
+    } else {
+      setForm({ title: "", category: "Elevator", desc: "", priority: "Medium" });
+      setShowForm(false);
+      setSubmitting(false);
+      refreshComplaints(residentId);
+    }
   };
 
   return (
@@ -389,9 +431,10 @@ function ResidentComplaints() {
               </button>
               <button
                 onClick={submit}
-                className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
+                disabled={submitting}
+                className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Submit Complaint
+                {submitting ? "Submitting..." : "Submit Complaint"}
               </button>
             </div>
           </div>

@@ -1,9 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useState } from "react";
 import { Camera, Mail, Phone, Building2, Users, Calendar, Edit3, Save, X } from "lucide-react";
 import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchMyProfile, updateMyProfile } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/profile")({
   head: () => ({ meta: [{ title: "My Profile — Communa" }] }),
@@ -22,35 +23,83 @@ type Profile = {
   familyCount: string;
   since: string;
   bio: string;
-};
-
-const initial: Profile = {
-  name: "Anika Sharma",
-  email: "anika@mail.com",
-  phone: "+91 98200 33445",
-  altPhone: "+91 98200 44556",
-  flat: "B-302",
-  block: "Block B",
-  floor: "3rd Floor",
-  sqft: "1,620",
-  familyCount: "4",
-  since: "August 2023",
-  bio: "Software engineer. Love community events and morning walks.",
+  id_suffix: string;
 };
 
 function ResidentProfile() {
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [profile, setProfile] = useState<Profile>(initial);
-  const [draft, setDraft] = useState<Profile>(initial);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [draft, setDraft] = useState<Profile | null>(null);
 
-  const save = () => {
-    setProfile(draft);
-    setEditing(false);
+  async function load() {
+    setLoading(true);
+    try {
+      const p = await fetchMyProfile();
+      if (p) {
+        const mapped: Profile = {
+          name: p.full_name,
+          email: p.email,
+          phone: p.phone || "",
+          altPhone: (p as any).alternate_phone || "",
+          flat: p.flat_number,
+          block: p.block_name,
+          floor: String(p.floor),
+          sqft: String(p.sqft),
+          familyCount: String(p.family_count || 1),
+          since: p.created_at ? new Date(p.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—",
+          bio: (p as any).bio || "",
+          id_suffix: (p.id ? String(p.id).slice(-4).toUpperCase() : "0000"),
+        };
+        setProfile(mapped);
+        setDraft(mapped);
+      }
+    } catch (err) {
+      console.error("Error loading profile:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const save = async () => {
+    if (!draft) return;
+    setLoading(true);
+    try {
+      const { error } = await updateMyProfile({
+        full_name: draft.name,
+        phone: draft.phone,
+        family_count: parseInt(draft.familyCount) || 1,
+        alternate_phone: draft.altPhone
+      });
+      if (error) {
+        alert("Error saving: " + error);
+      } else {
+        setProfile(draft);
+        setEditing(false);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
+
   const cancel = () => {
     setDraft(profile);
     setEditing(false);
   };
+
+  if (loading && !profile) {
+    return (
+      <DashboardLayout role="Resident" items={residentNav}>
+        <div className="py-20 text-center text-muted-foreground animate-pulse">Loading your profile...</div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!profile || !draft) return null;
 
   const initials = profile.name
     .split(" ")
@@ -117,7 +166,9 @@ function ResidentProfile() {
                 </div>
                 <div className="w-full rounded-xl bg-[image:var(--gradient-primary)] p-4 text-white text-center">
                   <div className="text-xs text-white/70 uppercase tracking-widest">Resident ID</div>
-                  <div className="text-lg font-semibold mt-1">RES-2023-0342</div>
+                  <div className="text-lg font-semibold mt-1">
+                    RES-{profile.since.split(" ").pop()}-{profile.id_suffix}
+                  </div>
                 </div>
               </div>
             </Card>
@@ -128,7 +179,7 @@ function ResidentProfile() {
                 { label: "Family Members", value: profile.familyCount, icon: Users },
                 { label: "Floor", value: profile.floor, icon: Building2 },
                 { label: "Area", value: `${profile.sqft} sqft`, icon: Building2 },
-                { label: "Since", value: "2023", icon: Calendar },
+                { label: "Since", value: profile.since.split(" ").pop() || "—", icon: Calendar },
               ].map((s) => (
                 <div key={s.label} className="rounded-2xl glass shadow-card p-4 text-center">
                   <s.icon className="h-5 w-5 mx-auto text-primary mb-2" />

@@ -138,6 +138,7 @@ export function Field({
   onChange,
   disabled,
   autoComplete,
+  error,
 }: {
   label: string;
   type?: string;
@@ -151,6 +152,7 @@ export function Field({
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   disabled?: boolean;
   autoComplete?: string;
+  error?: string;
 }) {
   return (
     <label className="block" htmlFor={id}>
@@ -171,10 +173,16 @@ export function Field({
           autoComplete={autoComplete}
           className="w-full h-11 px-3.5 rounded-lg border border-input bg-background/50 text-sm
             focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition
-            disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled:opacity-60 disabled:cursor-not-allowed
+            aria-invalid:border-destructive aria-invalid:ring-destructive/30"
+          aria-invalid={!!error}
         />
       )}
-      {hint && <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>}
+      {error ? (
+        <div className="text-xs text-destructive mt-1">{error}</div>
+      ) : hint ? (
+        <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>
+      ) : null}
     </label>
   );
 }
@@ -189,6 +197,7 @@ export function PasswordField({
   onChange,
   disabled,
   autoComplete,
+  error,
 }: {
   label?: string;
   required?: boolean;
@@ -199,6 +208,7 @@ export function PasswordField({
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   disabled?: boolean;
   autoComplete?: string;
+  error?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -220,7 +230,9 @@ export function PasswordField({
           autoComplete={autoComplete}
           className="w-full h-11 pl-3.5 pr-11 rounded-lg border border-input bg-background/50 text-sm
             focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition
-            disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled:opacity-60 disabled:cursor-not-allowed
+            aria-invalid:border-destructive aria-invalid:ring-destructive/30"
+          aria-invalid={!!error}
         />
         <button
           type="button"
@@ -231,6 +243,7 @@ export function PasswordField({
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
+      {error && <div className="text-xs text-destructive mt-1">{error}</div>}
     </label>
   );
 }

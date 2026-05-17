@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
   Building2,
   Users,
@@ -10,10 +11,19 @@ import {
   Dumbbell,
   Waves,
   Shield,
+  MapPin,
+  UserCheck,
 } from "lucide-react";
-import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { Card, DashboardLayout, Badge } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
+import {
+  fetchMyProfile,
+  fetchResidentBills,
+  fetchParkingAll,
+  type BillRow,
+  type ParkingSlotRow,
+} from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/flat")({
   head: () => ({ meta: [{ title: "My Flat — Communa" }] }),
@@ -29,14 +39,75 @@ const amenities = [
   { icon: Layers, label: "Lift", desc: "2 lifts per block" },
 ];
 
-const familyMembers = [
-  { name: "Anika Sharma", relation: "Self", age: "32" },
-  { name: "Rahul Sharma", relation: "Spouse", age: "35" },
-  { name: "Arya Sharma", relation: "Daughter", age: "8" },
-  { name: "Rohan Sharma", relation: "Son", age: "5" },
-];
-
 function ResidentFlat() {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{
+    flat_number: string;
+    block: string;
+    floor: string;
+    sqft: string;
+    type: string;
+    owner_name: string;
+    family_count: number;
+    since: string;
+    bills: BillRow[];
+    parking: ParkingSlotRow | null;
+  } | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const p = await fetchMyProfile();
+      if (p) {
+        const [bills, allParking] = await Promise.all([
+          fetchResidentBills(p.id),
+          fetchParkingAll(),
+        ]);
+
+        const myParking = allParking.find((s) => s.flat_id === (p as any).flat_id) || null;
+
+        setData({
+          flat_number: p.flat_number,
+          block: p.block_name,
+          floor: String(p.floor),
+          sqft: String(p.sqft),
+          type: p.type,
+          owner_name: p.owner_name,
+          family_count: p.family_count || 1,
+          since: p.created_at
+            ? new Date(p.created_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : "—",
+          bills,
+          parking: myParking,
+        });
+      }
+    } catch (err) {
+      console.error("Error loading flat data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  if (loading || !data) {
+    return (
+      <DashboardLayout role="Resident" items={residentNav}>
+        <div className="py-20 text-center text-muted-foreground animate-pulse">
+          Loading flat details...
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const latestBill = data.bills[0];
+
   return (
     <DashboardLayout role="Resident" items={residentNav}>
       <div className="space-y-6 animate-fade-up">
@@ -52,8 +123,18 @@ function ResidentFlat() {
             <div className="flex items-start justify-between">
               <div>
                 <div className="text-xs uppercase tracking-widest text-white/70">Your Flat</div>
-                <div className="mt-1 text-5xl font-semibold tracking-tight">B-302</div>
-                <div className="mt-2 text-white/80">Block B · 3rd Floor · Communa Heights</div>
+                <div className="mt-1 text-5xl font-semibold tracking-tight">{data.flat_number}</div>
+                <div className="mt-2 text-white/80">
+                  {data.block} · {data.floor}
+                  {data.floor.endsWith("1")
+                    ? "st"
+                    : data.floor.endsWith("2")
+                      ? "nd"
+                      : data.floor.endsWith("3")
+                        ? "rd"
+                        : "th"}{" "}
+                  Floor · Communa Heights
+                </div>
               </div>
               <div className="grid place-items-center h-16 w-16 rounded-2xl bg-white/15 backdrop-blur-sm">
                 <Building2 className="h-8 w-8" />
@@ -61,9 +142,12 @@ function ResidentFlat() {
             </div>
             <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: "Area", value: "1,620 sqft" },
-                { label: "Bedrooms", value: "3 BHK" },
-                { label: "Floor", value: "3rd" },
+                { label: "Area", value: `${data.sqft} sqft` },
+                { label: "Type", value: data.type },
+                {
+                  label: "Floor",
+                  value: `${data.floor}${data.floor.endsWith("1") ? "st" : data.floor.endsWith("2") ? "nd" : data.floor.endsWith("3") ? "rd" : "th"}`,
+                },
                 { label: "Facing", value: "East" },
               ].map((d) => (
                 <div key={d.label} className="rounded-xl bg-white/10 backdrop-blur-sm p-3">
@@ -81,14 +165,18 @@ function ResidentFlat() {
             <Card title="Flat Information">
               <div className="grid sm:grid-cols-2 gap-3">
                 {[
-                  { icon: Building2, label: "Flat Number", value: "B-302" },
-                  { icon: Layers, label: "Block", value: "Block B" },
-                  { icon: Layers, label: "Floor", value: "3rd Floor" },
-                  { icon: Maximize2, label: "Area", value: "1,620 sq ft" },
-                  { icon: Building2, label: "Type", value: "3 BHK" },
-                  { icon: Building2, label: "Facing", value: "East" },
-                  { icon: Calendar, label: "Possession Date", value: "Aug 15, 2023" },
-                  { icon: Users, label: "Occupancy", value: "4 Members" },
+                  { icon: Building2, label: "Flat Number", value: data.flat_number },
+                  { icon: Layers, label: "Block", value: data.block },
+                  {
+                    icon: Layers,
+                    label: "Floor",
+                    value: `${data.floor}${data.floor.endsWith("1") ? "st" : data.floor.endsWith("2") ? "nd" : data.floor.endsWith("3") ? "rd" : "th"} Floor`,
+                  },
+                  { icon: Maximize2, label: "Area", value: `${data.sqft} sq ft` },
+                  { icon: Building2, label: "Type", value: data.type },
+                  { icon: UserCheck, label: "Owner", value: data.owner_name },
+                  { icon: Calendar, label: "Possession Date", value: data.since },
+                  { icon: Users, label: "Occupancy", value: `${data.family_count} Members` },
                 ].map((d) => (
                   <div
                     key={d.label}
@@ -127,51 +215,36 @@ function ResidentFlat() {
             </Card>
           </div>
 
-          {/* Family members */}
           <div className="space-y-4">
-            <Card
-              title="Family Members"
-              action={
-                <span className="text-xs text-muted-foreground">
-                  {familyMembers.length} members
-                </span>
-              }
-            >
-              <div className="space-y-2">
-                {familyMembers.map((m) => {
-                  const initials = m.name
-                    .split(" ")
-                    .map((n) => n[0])
-                    .slice(0, 2)
-                    .join("");
-                  return (
-                    <div
-                      key={m.name}
-                      className="flex items-center gap-3 p-3 rounded-xl hover:bg-foreground/5 transition"
-                    >
-                      <div className="h-10 w-10 rounded-full bg-[image:var(--gradient-primary)] grid place-items-center text-white text-sm font-semibold shrink-0">
-                        {initials}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium">{m.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {m.relation} · Age {m.age}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-
             {/* Maintenance info */}
             <Card title="Maintenance Info">
               <div className="space-y-3">
                 {[
-                  { label: "Monthly Charge", value: "₹4,500" },
-                  { label: "Due Date", value: "30th of every month" },
-                  { label: "Payment Mode", value: "UPI / Net Banking" },
-                  { label: "Last Paid", value: "April 30, 2026" },
+                  { label: "Monthly Charge", value: latestBill ? `₹${latestBill.amount}` : "₹0" },
+                  {
+                    label: "Due Date",
+                    value: latestBill?.due_date
+                      ? new Date(latestBill.due_date).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : "30th of month",
+                  },
+                  {
+                    label: "Payment Status",
+                    value: latestBill
+                      ? latestBill.status.charAt(0).toUpperCase() + latestBill.status.slice(1)
+                      : "No Bill",
+                  },
+                  {
+                    label: "Last Bill Date",
+                    value: latestBill?.created_at
+                      ? new Date(latestBill.created_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : "—",
+                  },
                 ].map((d) => (
                   <div key={d.label} className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{d.label}</span>
@@ -179,6 +252,89 @@ function ResidentFlat() {
                   </div>
                 ))}
               </div>
+            </Card>
+
+            {/* Parking info - REPLACES QUICK SUPPORT */}
+            <Card title="My Parking Slot">
+              <div className="rounded-xl bg-[image:var(--gradient-primary)] p-4 text-white shadow-elegant">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="grid place-items-center h-10 w-10 rounded-lg bg-white/20 backdrop-blur-md">
+                    <Car className="h-6 w-6" />
+                  </div>
+                  <Badge tone="muted" className="bg-white/20 border-white/30 text-white">
+                    {data.parking ? "Assigned" : "Unassigned"}
+                  </Badge>
+                </div>
+
+                {data.parking ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-white/70">
+                        Slot Number
+                      </div>
+                      <div className="text-3xl font-bold tracking-tight">
+                        {data.parking.slot_number}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-white/10 p-2">
+                        <div className="text-[9px] text-white/60 flex items-center gap-1">
+                          <MapPin className="h-2.5 w-2.5" /> Level
+                        </div>
+                        <div className="text-xs font-semibold">{data.parking.level}</div>
+                      </div>
+                      <div className="rounded-lg bg-white/10 p-2">
+                        <div className="text-[9px] text-white/60 flex items-center gap-1">
+                          <MapPin className="h-2.5 w-2.5" /> Zone
+                        </div>
+                        <div className="text-xs font-semibold">{data.parking.zone || "N/A"}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center">
+                    <p className="text-sm text-white/80">No parking slot assigned yet.</p>
+                    <p className="text-[10px] text-white/60 mt-1">
+                      Contact management to request a slot.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* Family Members summary */}
+            <Card title="Family Members">
+              <div className="flex items-center gap-4 p-1">
+                <div className="grid place-items-center h-12 w-12 rounded-full bg-foreground/5 text-primary">
+                  <Users className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold">{data.family_count} Members</div>
+                  <div className="text-xs text-muted-foreground">Registered under this flat</div>
+                </div>
+              </div>
+            </Card>
+
+            {/* Emergency Contacts - SUITABLE FOR FLAT PAGE */}
+            <Card title="Emergency Contacts">
+              <div className="space-y-3">
+                {[
+                  { label: "Security Gate", value: "+91 98765 43210" },
+                  { label: "Maintenance", value: "+91 98765 43211" },
+                  { label: "Facility Manager", value: "+91 98765 43212" },
+                ].map((c) => (
+                  <div key={c.label} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{c.label}</span>
+                    <span className="font-medium text-primary cursor-pointer hover:underline">
+                      {c.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button className="w-full mt-4 py-2 rounded-lg bg-foreground/5 border border-border text-[10px] font-medium hover:bg-foreground/10 transition uppercase tracking-wider">
+                View All Contacts
+              </button>
             </Card>
           </div>
         </div>
