@@ -19,7 +19,7 @@ import { residentNav } from "@/components/dashboard/residentNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import {
   fetchMyProfile,
-  fetchResidentBills,
+  fetchBillsForResident,
   fetchParkingAll,
   type BillRow,
   type ParkingSlotRow,
@@ -60,7 +60,8 @@ function ResidentFlat() {
       const p = await fetchMyProfile();
       if (p) {
         const [bills, allParking] = await Promise.all([
-          fetchResidentBills(p.id),
+          // Pass the numeric flat_id (bigint FK), not the resident's text id
+          fetchBillsForResident((p as any).flat_id),
           fetchParkingAll(),
         ]);
 
@@ -238,8 +239,8 @@ function ResidentFlat() {
                   },
                   {
                     label: "Last Bill Date",
-                    value: latestBill?.created_at
-                      ? new Date(latestBill.created_at).toLocaleDateString("en-US", {
+                    value: latestBill?.generated_at
+                      ? new Date(latestBill.generated_at).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
                         })

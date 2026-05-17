@@ -40,16 +40,30 @@ export type ComplaintRow = {
   priority: string | null;
   created_at: string;
 };
+/**
+ * Matches public.billing schema exactly:
+ *   id           bigint generated always as identity  (auto — never pass in insert)
+ *   flat_id      bigint (FK → flats.id)
+ *   amount       numeric
+ *   due_date     date
+ *   status       text  CHECK IN ('pending','paid','overdue')  default 'pending'
+ *   generated_at timestamp  default now()
+ *   paid_at      timestamp
+ *   payment_method text
+ *   transaction_id text
+ *   label        text  default 'Maintenance'
+ */
 export type BillRow = {
-  id: number | string;
-  flat_id: string; // Using flat_id instead of resident_id as per your schema
+  id: number;                  // bigint → number in JS
+  flat_id: number | null;      // bigint FK
+  label: string | null;
   amount: number;
-  status: string; // 'pending', 'paid', 'overdue'
-  due_date: string | null;
+  status: "pending" | "paid" | "overdue";
+  due_date: string | null;     // date as ISO string
   paid_at: string | null;
   generated_at: string;
-  payment_method?: string | null;
-  transaction_id?: string | null;
+  payment_method: string | null;
+  transaction_id: string | null;
 };
 export type VisitorRow = {
   id: string;
@@ -148,56 +162,174 @@ export async function fetchRecentComplaints(limit: number): Promise<ComplaintRow
   return error ? [] : (data as ComplaintRow[]) ?? [];
 }
 
+/** Fire-and-forget overdue updater — does NOT block page loads */
+function triggerOverdueUpdate(): void {
+  const today = new Date().toISOString().split("T")[0];
+  supabase
+    .from("billing")
+    .update({ status: "overdue" })
+    .eq("status", "pending")
+    .lt("due_date", today)
+    .then(
+      () => {},
+      (err) => console.warn("Failed to silently trigger overdue update:", err)
+    );
+}
+
 export async function updateOverdueBills(): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
   await supabase.from("billing").update({ status: "overdue" }).eq("status", "pending").lt("due_date", today);
 }
 
 export async function fetchRecentBills(limit: number): Promise<BillRow[]> {
-  await updateOverdueBills();
+  triggerOverdueUpdate();
   const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false }).limit(limit);
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
 export async function fetchBillsAll(): Promise<BillRow[]> {
-  await updateOverdueBills();
+  triggerOverdueUpdate();
   const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false });
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
-export async function fetchBillsForResident(flatId: string): Promise<BillRow[]> {
-  await updateOverdueBills();
-  const { data, error } = await supabase.from("billing").select("*").eq("flat_id", flatId).order("generated_at", { ascending: false });
+/** Fetch all bills with joined flat + resident + block info for rich admin display. */
+export type BillDetailed = BillRow & {
+  flat_number: string;
+  block_name: string;
+  resident_name: string;
+};
+
+export async function fetchBillsAllDetailed(): Promise<BillDetailed[]> {
+  // Fire overdue update in background — don't await it
+  triggerOverdueUpdate();
+
+  // All three queries run in parallel
+  const [billsRes, flatsRes, residentsRes] = await Promise.all([
+    supabase
+      .from("billing")
+      .select("id, flat_id, label, amount, status, due_date, paid_at, generated_at, payment_method, transaction_id")
+      .order("generated_at", { ascending: false }),
+    supabase
+      .from("flats")
+      .select("id, flat_number, block_id, owner_name, blocks:block_id(name)"),
+    supabase
+      .from("residents")
+      .select("flat_id, full_name"),
+  ]);
+
+  if (billsRes.error) {
+    console.error("[billing] SELECT error:", billsRes.error.message, billsRes.error.details);
+    return [];
+  }
+
+  const bills = (billsRes.data ?? []) as BillRow[];
+  const flats  = (flatsRes.data  ?? []) as any[];
+  const residents = (residentsRes.data ?? []) as any[];
+
+  // Map keys: convert both sides to string so bigint ↔ text comparison always works
+  const flatMap     = new Map<string, any>(flats.map((f)    => [String(f.id),      f]));
+  const residentMap = new Map<string, any>(residents.map((r) => [String(r.flat_id), r]));
+
+  return bills.map((b) => {
+    const flat     = flatMap.get(String(b.flat_id));
+    const resident = residentMap.get(String(b.flat_id));
+    return {
+      ...b,
+      flat_number:   flat?.flat_number       ?? "N/A",
+      block_name:    flat?.blocks?.name      ?? "N/A",
+      resident_name: resident?.full_name     ?? flat?.owner_name ?? "—",
+    };
+  });
+}
+
+export async function fetchBillsForResident(flatId: number | string): Promise<BillRow[]> {
+  triggerOverdueUpdate();
+  const { data, error } = await supabase
+    .from("billing")
+    .select("*")
+    .eq("flat_id", Number(flatId))
+    .order("generated_at", { ascending: false });
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
-export async function createBill(args: { flat_id: string; amount: number; due_date: string; }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("billing").insert({ flat_id: args.flat_id, amount: args.amount, due_date: args.due_date, status: "pending", generated_at: new Date().toISOString() });
+export async function createBill(args: {
+  flat_id: number | string;
+  amount: number;
+  due_date: string;
+  label?: string;
+}): Promise<{ error: string | null }> {
+  // Only pass the 5 writeable columns — id & generated_at have DB defaults
+  const { error } = await supabase.from("billing").insert({
+    flat_id: Number(args.flat_id),
+    amount:  args.amount,
+    due_date: args.due_date,
+    status:  "pending",
+    label:   args.label ?? "Maintenance",
+  });
   return error ? { error: error.message } : { error: null };
 }
 
-export async function createBillsBulk(args: { target: "all" | string; amount: number; due_date: string; label?: string; }): Promise<{ count: number; error: string | null }> {
-  let query = supabase.from("flats").select("id, block_id");
+export async function createBillsBulk(args: {
+  target: "all" | string;
+  amount: number;
+  due_date: string;
+  label?: string;
+}): Promise<{ count: number; error: string | null }> {
+  // 1. Fetch flats for the target block (or all)
+  let query = supabase.from("flats").select("id, block_id, status");
   if (args.target !== "all") query = query.eq("block_id", args.target);
-  const { data: targets, error: tErr } = await query;
-  if (tErr || !targets) return { count: 0, error: tErr?.message || "No targets found" };
-  
-  const now = new Date().toISOString();
-  const inserts = targets.map(t => ({ 
-    flat_id: t.id, 
-    amount: args.amount, 
-    due_date: args.due_date, 
-    status: "pending", 
-    generated_at: now 
+  const { data: allFlats, error: flatErr } = await query;
+
+  if (flatErr) {
+    console.error("[billing] flats fetch error:", flatErr.message);
+    return { count: 0, error: flatErr.message };
+  }
+
+  // 2. Filter occupied flats (case-insensitive — handles 'occupied' or 'Occupied')
+  const occupied = (allFlats ?? []).filter(
+    (f) => String(f.status).toLowerCase() === "occupied"
+  );
+
+  if (occupied.length === 0) {
+    return {
+      count: 0,
+      error: "No occupied flats found for the selected target. Register at least one resident first.",
+    };
+  }
+
+  // 3. Build insert rows — only the 5 writeable columns the DB accepts
+  //    id          → auto (generated always as identity)
+  //    generated_at → auto (default now())
+  const rows = occupied.map((f) => ({
+    flat_id:  Number(f.id),          // bigint FK
+    amount:   args.amount,
+    due_date: args.due_date,
+    status:   "pending" as const,
+    label:    args.label ?? "Maintenance",
   }));
 
-  // Perform a single bulk insert without returning all data (faster)
-  const { error: iErr } = await supabase.from("billing").insert(inserts, { count: "none" });
-  return iErr ? { count: 0, error: iErr.message } : { count: inserts.length, error: null };
+  // 4. Insert — plain insert, no chained .select() or .limit() which can cause hangs
+  const { error: insertErr } = await supabase.from("billing").insert(rows);
+
+  if (insertErr) {
+    console.error("[billing] insert error:", insertErr.message, insertErr.details);
+    return { count: 0, error: insertErr.message };
+  }
+
+  return { count: rows.length, error: null };
 }
 
-export async function payBill(args: { bill_id: number | string }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("billing").update({ status: "paid", paid_at: new Date().toISOString(), payment_method: "Simulated", transaction_id: `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}` }).eq("id", args.bill_id);
+export async function payBill(args: { bill_id: number }): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from("billing")
+    .update({
+      status: "paid",
+      paid_at: new Date().toISOString(),
+      payment_method: "Simulated",
+      transaction_id: `TXN-${Math.random().toString(36).substring(2, 11).toUpperCase()}`,
+    })
+    .eq("id", args.bill_id);
   return error ? { error: error.message } : { error: null };
 }
 
@@ -266,6 +398,11 @@ export async function createComplaint(args: { resident_id: string; title: string
 export async function updateComplaintStatus(id: string, status: string): Promise<{ error: string | null }> {
   const dbStatus = status === "pending" ? "open" : status === "in-progress" ? "in_progress" : status;
   const { error } = await supabase.from("complaints").update({ status: dbStatus, updated_at: new Date().toISOString() }).eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function updateComplaintPriority(id: string, priority: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("complaints").update({ priority: priority.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", id);
   return error ? { error: error.message } : { error: null };
 }
 
