@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { type LucideIcon, Search, X, LogIn, LogOut, Phone, Car, User } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
 import { FilterPill, PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchVisitorsDetailed, type VisitorDetailed } from "@/services/supabase/community";
+import { supabase } from "@/services/supabase/client";
 
 export const Route = createFileRoute("/dashboard/admin/visitors")({
   head: () => ({ meta: [{ title: "Visitors — Communa Admin" }] }),
@@ -22,77 +24,51 @@ type Visitor = {
   vehicle?: string;
 };
 
-const data: Visitor[] = [
-  {
-    id: "V-501",
-    name: "Rohit Sharma",
-    phone: "+91 99887 11223",
-    type: "Guest",
-    flat: "A-204",
-    host: "Priya Mehta",
-    checkIn: "09:42",
-    vehicle: "MH-12 AB-1234",
-  },
-  {
-    id: "V-500",
-    name: "Amazon Delivery",
-    phone: "+91 99887 22334",
-    type: "Delivery",
-    flat: "B-302",
-    host: "Anika Sharma",
-    checkIn: "09:31",
-    checkOut: "09:38",
-  },
-  {
-    id: "V-499",
-    name: "Uber Cab",
-    phone: "+91 99887 33445",
-    type: "Cab",
-    flat: "C-105",
-    host: "Sunil Joshi",
-    checkIn: "08:55",
-    checkOut: "09:02",
-    vehicle: "MH-04 XY-9988",
-  },
-  {
-    id: "V-498",
-    name: "Plumber - Suresh",
-    phone: "+91 99887 44556",
-    type: "Service",
-    flat: "D-405",
-    host: "Arjun Rao",
-    checkIn: "08:20",
-  },
-  {
-    id: "V-497",
-    name: "Family Visit",
-    phone: "+91 99887 55667",
-    type: "Guest",
-    flat: "A-101",
-    host: "Ravi Kumar",
-    checkIn: "07:15",
-    checkOut: "08:55",
-  },
-];
-
 function VisitorsPage() {
+  const [data, setData] = useState<VisitorDetailed[]>([]);
   const [q, setQ] = useState("");
   const [type, setType] = useState<"All" | Visitor["type"]>("All");
   const [selected, setSelected] = useState<Visitor | null>(null);
 
+  const loadData = () => {
+    fetchVisitorsDetailed().then(setData);
+  };
+
+  useEffect(() => {
+    loadData();
+
+    const channel = supabase
+      .channel("admin_visitors_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "visitors" }, () => {
+        loadData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const mappedData = useMemo(() => {
+    return data.map((v) => ({
+      ...v,
+      type: v.purpose as any,
+    }));
+  }, [data]);
+
   const filtered = useMemo(
     () =>
-      data.filter((v) => {
+      mappedData.filter((v) => {
         const matchQ =
           !q ||
           v.name.toLowerCase().includes(q.toLowerCase()) ||
           v.flat.toLowerCase().includes(q.toLowerCase());
         return matchQ && (type === "All" || v.type === type);
       }),
-    [q, type],
+    [mappedData, q, type],
   );
 
-  const active = data.filter((v) => !v.checkOut);
+  const active = useMemo(() => mappedData.filter((v) => !v.checkOut), [mappedData]);
   const tone = (t: Visitor["type"]) =>
     t === "Guest" ? "primary" : t === "Delivery" ? "warning" : t === "Cab" ? "accent" : "success";
 
@@ -102,7 +78,7 @@ function VisitorsPage() {
         <PageHeader title="Visitors" subtitle="Live visitor logs and gate activity." />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Visitors Today" value={String(data.length)} icon={User} tone="primary" />
+          <StatCard label="Visitors Today" value={String(mappedData.length)} icon={User} tone="primary" />
           <StatCard
             label="Currently Inside"
             value={String(active.length)}
@@ -111,7 +87,7 @@ function VisitorsPage() {
           />
           <StatCard
             label="Deliveries"
-            value={String(data.filter((v) => v.type === "Delivery").length)}
+            value={String(mappedData.filter((v) => v.type === "Delivery").length)}
             icon={Car}
             tone="warning"
           />

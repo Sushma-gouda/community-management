@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import {
   fetchRecentVisitors,
   checkoutVisitor,
-  type VisitorRow,
+  type VisitorDetailed,
 } from "@/services/supabase/community";
 import {
   UserCheck,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { securityNav } from "@/components/dashboard/securityNav";
+import { supabase } from "@/services/supabase/client";
 
 export const Route = createFileRoute("/dashboard/security/")({
   head: () => ({ meta: [{ title: "Security Dashboard — Communa" }] }),
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/dashboard/security/")({
 });
 
 function SecurityDashboard() {
-  const [visitors, setVisitors] = useState<VisitorRow[]>([]);
+  const [visitors, setVisitors] = useState<VisitorDetailed[]>([]);
   const [loadingCheckout, setLoadingCheckout] = useState<string | null>(null);
 
   const fetchLogs = async () => {
@@ -34,6 +35,17 @@ function SecurityDashboard() {
 
   useEffect(() => {
     fetchLogs();
+
+    const channel = supabase
+      .channel("security_dashboard_visitors_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "visitors" }, () => {
+        fetchLogs();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleCheckout = async (id: string) => {
@@ -43,10 +55,11 @@ function SecurityDashboard() {
     setLoadingCheckout(null);
   };
 
-  const activeVisitors = visitors.filter((v) => !v.check_out);
-  const todaysEntries = visitors.filter(
-    (v) => new Date(v.check_in).toDateString() === new Date().toDateString(),
-  ).length;
+  const activeVisitors = visitors.filter((v) => !v.checkOut);
+  const todaysEntries = visitors.filter((v) => {
+    if (!v.entry_time_raw) return false;
+    return new Date(v.entry_time_raw).toDateString() === new Date().toDateString();
+  }).length;
 
   return (
     <DashboardLayout role="Security" items={securityNav}>
@@ -111,17 +124,17 @@ function SecurityDashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{v.name}</div>
-                    <div className="text-[11px] text-muted-foreground">→ {v.flat_number}</div>
+                    <div className="text-[11px] text-muted-foreground">→ {v.flat}</div>
                   </div>
                   <Badge tone={v.purpose === "Guest" ? "primary" : "accent"}>{v.purpose}</Badge>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <LogIn className="h-3 w-3" />{" "}
-                    {new Date(v.check_in).toLocaleTimeString([], {
+                    {v.entry_time_raw ? new Date(v.entry_time_raw).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
-                    })}
+                    }) : ""}
                   </span>
                   <button
                     onClick={() => void handleCheckout(v.id)}
@@ -174,17 +187,17 @@ function SecurityDashboard() {
                         className="border-b border-border last:border-0 hover:bg-foreground/[0.02]"
                       >
                         <td className="px-2 py-3 font-medium">{v.name}</td>
-                        <td className="px-2 py-3">{v.flat_number}</td>
+                        <td className="px-2 py-3">{v.flat}</td>
                         <td className="px-2 py-3 text-foreground/80">{v.purpose}</td>
                         <td className="px-2 py-3 text-foreground/80">
-                          {new Date(v.check_in).toLocaleTimeString([], {
+                          {v.entry_time_raw ? new Date(v.entry_time_raw).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
-                          })}
+                          }) : ""}
                         </td>
                         <td className="px-2 py-3">
-                          <Badge tone={v.check_out ? "muted" : "primary"}>
-                            {v.check_out ? "Left" : "Inside"}
+                          <Badge tone={v.checkOut ? "muted" : "primary"}>
+                            {v.checkOut ? "Left" : "Inside"}
                           </Badge>
                         </td>
                       </tr>

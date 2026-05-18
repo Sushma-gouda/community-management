@@ -1,9 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { UserPlus, CheckCircle2, Phone, Car, Building2, User, FileText } from "lucide-react";
 import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { securityNav } from "@/components/dashboard/securityNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchFlatsWithBlocks, insertVisitor } from "@/services/supabase/community";
+import { useAuth } from "@/context/AuthContext";
 
 export const Route = createFileRoute("/dashboard/security/add-visitor")({
   head: () => ({ meta: [{ title: "Add Visitor — Communa Security" }] }),
@@ -12,27 +14,9 @@ export const Route = createFileRoute("/dashboard/security/add-visitor")({
 
 type VisitorType = "Guest" | "Delivery" | "Service" | "Cab";
 
-const flats = [
-  "A-101",
-  "A-204",
-  "A-302",
-  "A-405",
-  "B-101",
-  "B-204",
-  "B-302",
-  "B-405",
-  "C-101",
-  "C-204",
-  "C-302",
-  "C-405",
-  "D-101",
-  "D-204",
-  "D-302",
-  "D-405",
-];
-
 function AddVisitor() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [step, setStep] = useState<"form" | "otp" | "success">("form");
   const [form, setForm] = useState({
     name: "",
@@ -43,15 +27,46 @@ function AddVisitor() {
     notes: "",
   });
   const [otp, setOtp] = useState(["", "", "", ""]);
+  const [dbFlats, setDbFlats] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchFlatsWithBlocks().then((data) => {
+      const sorted = (data ?? []).sort((a, b) => {
+        const blockA = a.blocks?.name || "";
+        const blockB = b.blocks?.name || "";
+        if (blockA !== blockB) return blockA.localeCompare(blockB);
+        return a.flat_number.localeCompare(b.flat_number);
+      });
+      setDbFlats(sorted);
+    });
+  }, []);
 
   const handleSubmit = () => {
     if (!form.name || !form.phone || !form.flat) return;
     setStep("otp");
   };
 
-  const handleOtp = () => {
-    setStep("success");
-    setTimeout(() => navigate({ to: "/dashboard/security/active-visitors" }), 2000);
+  const handleOtp = async () => {
+    try {
+      const { error } = await insertVisitor({
+        name: form.name,
+        phone: form.phone,
+        flat_id: form.flat,
+        purpose: form.purpose,
+        vehicle_number: form.vehicle || undefined,
+        security_id: user?.id,
+      });
+
+      if (error) {
+        alert("Failed to create visitor: " + error);
+        return;
+      }
+
+      setStep("success");
+      setTimeout(() => navigate({ to: "/dashboard/security/active-visitors" }), 2000);
+    } catch (err: any) {
+      alert("An unexpected error occurred: " + err.message);
+    }
   };
 
   const purposeColors: Record<VisitorType, string> = {
@@ -167,9 +182,14 @@ function AddVisitor() {
                           className="w-full h-10 pl-9 pr-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-2 focus:ring-ring transition"
                         >
                           <option value="">Select flat…</option>
-                          {flats.map((f) => (
-                            <option key={f}>{f}</option>
-                          ))}
+                          {dbFlats.map((f) => {
+                            const label = `${f.blocks?.name || ""}-${f.flat_number}`;
+                            return (
+                              <option key={f.id} value={f.id}>
+                                {label}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                     </label>
@@ -221,7 +241,7 @@ function AddVisitor() {
                 </div>
                 <div className="text-lg font-semibold">Verify with OTP</div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  OTP sent to resident of {form.flat}
+                  OTP sent to resident of {dbFlats.find((f) => f.id === form.flat)?.blocks?.name || ""}-{dbFlats.find((f) => f.id === form.flat)?.flat_number || "selected flat"}
                 </div>
               </div>
 
@@ -278,7 +298,7 @@ function AddVisitor() {
                 </div>
                 <div className="text-2xl font-semibold">Entry Successful!</div>
                 <div className="text-sm text-muted-foreground mt-2">
-                  {form.name} has been checked in to {form.flat}
+                  {form.name} has been checked in to {dbFlats.find((f) => f.id === form.flat)?.blocks?.name || ""}-{dbFlats.find((f) => f.id === form.flat)?.flat_number || "selected flat"}
                 </div>
                 <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-foreground/5 text-sm">
                   <UserPlus className="h-4 w-4 text-primary" />

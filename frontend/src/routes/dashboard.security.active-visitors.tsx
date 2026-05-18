@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LogOut, Phone, Building2, Clock, UserCheck, Search, X } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { securityNav } from "@/components/dashboard/securityNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchActiveVisitorsDetailed, checkoutVisitor, type VisitorDetailed } from "@/services/supabase/community";
+import { supabase } from "@/services/supabase/client";
 
 export const Route = createFileRoute("/dashboard/security/active-visitors")({
   head: () => ({ meta: [{ title: "Active Visitors — Communa Security" }] }),
@@ -11,70 +13,34 @@ export const Route = createFileRoute("/dashboard/security/active-visitors")({
 });
 
 type VisitorType = "Guest" | "Delivery" | "Service" | "Cab";
-type Visitor = {
-  id: string;
-  name: string;
-  phone: string;
-  flat: string;
-  host: string;
-  purpose: VisitorType;
-  checkIn: string;
-  vehicle?: string;
-  guard: string;
-};
-
-const seed: Visitor[] = [
-  {
-    id: "V-501",
-    name: "Rohan Mehta",
-    phone: "+91 99887 11223",
-    flat: "A-204",
-    host: "Priya Mehta",
-    purpose: "Guest",
-    checkIn: "10:42 AM",
-    guard: "R. Singh",
-  },
-  {
-    id: "V-499",
-    name: "Plumber — Suresh",
-    phone: "+91 99887 33445",
-    flat: "C-101",
-    host: "Sunil Joshi",
-    purpose: "Service",
-    checkIn: "10:21 AM",
-    guard: "R. Singh",
-  },
-  {
-    id: "V-497",
-    name: "Ravi Kumar (Family)",
-    phone: "+91 99887 55667",
-    flat: "D-405",
-    host: "Arjun Rao",
-    purpose: "Guest",
-    checkIn: "09:58 AM",
-    guard: "M. Patil",
-  },
-  {
-    id: "V-495",
-    name: "Electrician — Ramesh",
-    phone: "+91 99887 77889",
-    flat: "B-302",
-    host: "Anika Sharma",
-    purpose: "Service",
-    checkIn: "09:30 AM",
-    vehicle: "MH-12 XY-1234",
-    guard: "M. Patil",
-  },
-];
 
 const purposeTone = (p: VisitorType) =>
   p === "Guest" ? "primary" : p === "Delivery" ? "warning" : p === "Service" ? "accent" : "success";
 
 function ActiveVisitors() {
-  const [visitors, setVisitors] = useState(seed);
+  const [visitors, setVisitors] = useState<VisitorDetailed[]>([]);
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<Visitor | null>(null);
+  const [selected, setSelected] = useState<VisitorDetailed | null>(null);
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+
+  const loadVisitors = () => {
+    fetchActiveVisitorsDetailed().then(setVisitors);
+  };
+
+  useEffect(() => {
+    loadVisitors();
+
+    const channel = supabase
+      .channel("active_visitors_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "visitors" }, () => {
+        loadVisitors();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const filtered = visitors.filter(
     (v) =>
@@ -83,8 +49,14 @@ function ActiveVisitors() {
       v.flat.toLowerCase().includes(q.toLowerCase()),
   );
 
-  const handleCheckout = (id: string) => {
+  const handleCheckout = async (id: string) => {
     setCheckingOut(id);
+    const { error } = await checkoutVisitor(id);
+    if (error) {
+      alert("Failed to checkout visitor: " + error);
+      setCheckingOut(null);
+      return;
+    }
     setTimeout(() => {
       setVisitors((prev) => prev.filter((v) => v.id !== id));
       setSelected(null);

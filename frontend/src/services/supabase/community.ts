@@ -333,14 +333,13 @@ export async function payBill(args: { bill_id: number }): Promise<{ error: strin
   return error ? { error: error.message } : { error: null };
 }
 
-export async function fetchRecentVisitors(limit: number): Promise<VisitorRow[]> {
-  const { data, error } = await supabase.from("visitors").select("*").order("entry_time", { ascending: false }).limit(limit);
-  return error ? [] : (data as VisitorRow[]) ?? [];
+export async function fetchRecentVisitors(limit: number): Promise<VisitorDetailed[]> {
+  const all = await fetchVisitorsDetailed();
+  return all.slice(0, limit);
 }
 
-export async function fetchVisitorsAll(): Promise<VisitorRow[]> {
-  const { data, error } = await supabase.from("visitors").select("*").order("entry_time", { ascending: false });
-  return error ? [] : (data as VisitorRow[]) ?? [];
+export async function fetchVisitorsAll(): Promise<VisitorDetailed[]> {
+  return fetchVisitorsDetailed();
 }
 
 export async function fetchNotices(limit: number): Promise<NoticeRow[]> {
@@ -433,9 +432,161 @@ export async function updateResident(id: string, args: Partial<ResidentRow>): Pr
   return error ? { error: error.message } : { error: null };
 }
 
+export type ParkingDetailed = {
+  id: string; // uuid
+  flat_id: number;
+  slot_number: string;
+  vehicle_type: "Car" | "Bike" | "EV";
+  vehicle_model: string | null;
+  plate_number: string;
+  allocated_at: string;
+  flat_number: string;
+  block_name: string;
+  resident_name: string;
+};
+
 export async function fetchParkingAll(): Promise<ParkingSlotRow[]> {
   const { data, error } = await supabase.from("parking").select("*");
   return error ? [] : (data as ParkingSlotRow[]) ?? [];
+}
+
+export async function fetchParkingAllDetailed(): Promise<ParkingDetailed[]> {
+  const [parkingRes, flatsRes, residentsRes] = await Promise.all([
+    supabase
+      .from("parking")
+      .select("*")
+      .order("allocated_at", { ascending: false }),
+    supabase
+      .from("flats")
+      .select("id, flat_number, block_id, owner_name, blocks:block_id(name)"),
+    supabase
+      .from("residents")
+      .select("flat_id, full_name"),
+  ]);
+
+  if (parkingRes.error) {
+    console.error("[parking] SELECT error:", parkingRes.error.message);
+    return [];
+  }
+
+  const parking = (parkingRes.data ?? []) as any[];
+  const flats = (flatsRes.data ?? []) as any[];
+  const residents = (residentsRes.data ?? []) as any[];
+
+  const flatMap = new Map<string, any>(flats.map((f) => [String(f.id), f]));
+  const residentMap = new Map<string, any>(residents.map((r) => [String(r.flat_id), r]));
+
+  return parking.map((p) => {
+    const flat = flatMap.get(String(p.flat_id));
+    const resident = residentMap.get(String(p.flat_id));
+    return {
+      id: p.id,
+      flat_id: Number(p.flat_id),
+      slot_number: p.slot_number,
+      vehicle_type: p.vehicle_type,
+      vehicle_model: p.vehicle_model,
+      plate_number: p.plate_number,
+      allocated_at: p.allocated_at,
+      flat_number: flat?.flat_number ?? "N/A",
+      block_name: flat?.blocks?.name ?? "N/A",
+      resident_name: resident?.full_name ?? flat?.owner_name ?? "—",
+    };
+  });
+}
+
+export async function fetchResidentParking(): Promise<ParkingDetailed[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: resident, error: resErr } = await supabase
+    .from("residents")
+    .select("flat_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (resErr || !resident) return [];
+
+  const cleanFlatId = isNaN(Number(resident.flat_id)) ? resident.flat_id : Number(resident.flat_id);
+
+  const [parkingRes, flatsRes] = await Promise.all([
+    supabase
+      .from("parking")
+      .select("*")
+      .eq("flat_id", cleanFlatId),
+    supabase
+      .from("flats")
+      .select("id, flat_number, owner_name, blocks:block_id(name)")
+      .eq("id", resident.flat_id)
+      .maybeSingle(),
+  ]);
+
+  if (parkingRes.error || !parkingRes.data) return [];
+
+  const parkingList = parkingRes.data as any[];
+  const flat = flatsRes.data as any;
+
+  return parkingList.map((p) => {
+    const pFlatId = isNaN(Number(p.flat_id)) ? p.flat_id : Number(p.flat_id);
+    return {
+      id: p.id,
+      flat_id: pFlatId,
+      slot_number: p.slot_number,
+      vehicle_type: p.vehicle_type,
+      vehicle_model: p.vehicle_model,
+      plate_number: p.plate_number,
+      allocated_at: p.allocated_at,
+      flat_number: flat?.flat_number ?? "N/A",
+      block_name: flat?.blocks?.name ?? "N/A",
+      resident_name: flat?.owner_name ?? "—",
+    };
+  });
+}
+
+export async function assignParkingSlot(args: {
+  flat_id: number | string;
+  slot_number: string;
+  vehicle_type: string;
+  vehicle_model?: string;
+  plate_number: string;
+}): Promise<{ error: string | null }> {
+  const cleanFlatId = isNaN(Number(args.flat_id)) ? args.flat_id : Number(args.flat_id);
+  const { error } = await supabase.from("parking").insert({
+    flat_id: cleanFlatId,
+    slot_number: args.slot_number,
+    vehicle_type: args.vehicle_type,
+    vehicle_model: args.vehicle_model || null,
+    plate_number: args.plate_number,
+  });
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function updateParkingSlot(
+  id: string,
+  args: {
+    vehicle_type: string;
+    vehicle_model?: string;
+    plate_number: string;
+    flat_id?: number | string;
+    slot_number?: string;
+  }
+): Promise<{ error: string | null }> {
+  const payload: any = {
+    vehicle_type: args.vehicle_type,
+    vehicle_model: args.vehicle_model || null,
+    plate_number: args.plate_number,
+  };
+  if (args.flat_id) {
+    payload.flat_id = isNaN(Number(args.flat_id)) ? args.flat_id : Number(args.flat_id);
+  }
+  if (args.slot_number) payload.slot_number = args.slot_number;
+
+  const { error } = await supabase.from("parking").update(payload).eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function deleteParkingSlot(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("parking").delete().eq("id", id);
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function fetchMaintenanceAssets(): Promise<MaintenanceAssetRow[]> {
@@ -448,7 +599,197 @@ export async function checkoutVisitor(id: string): Promise<{ error: string | nul
   return error ? { error: error.message } : { error: null };
 }
 
-export async function insertVisitor(args: { name: string; phone: string; flat_id: string; purpose: string; vehicle_number?: string; }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("visitors").insert({ name: args.name, phone: args.phone, flat_id: args.flat_id, purpose: args.purpose, vehicle_number: args.vehicle_number ?? null, entry_time: new Date().toISOString() });
+export async function insertVisitor(args: {
+  name: string;
+  phone: string;
+  flat_id: string;
+  purpose: string;
+  vehicle_number?: string;
+  security_id?: string;
+}): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("visitors").insert({
+    name: args.name,
+    phone: args.phone,
+    flat_id: args.flat_id,
+    purpose: args.purpose,
+    vehicle_number: args.vehicle_number ?? null,
+    security_id: args.security_id ?? null,
+    entry_time: new Date().toISOString(),
+  });
   return error ? { error: error.message } : { error: null };
 }
+
+export type VisitorDetailed = {
+  id: string;
+  name: string;
+  phone: string;
+  flat_id: string;
+  flat: string;
+  host: string;
+  purpose: "Guest" | "Delivery" | "Service" | "Cab";
+  checkIn: string;
+  checkOut?: string;
+  vehicle?: string;
+  date: string;
+  guard: string;
+  entry_time_raw: string;
+  exit_time_raw: string | null;
+};
+
+export async function fetchVisitorsDetailed(): Promise<VisitorDetailed[]> {
+  const { data: visitorsData, error: visitorsErr } = await supabase
+    .from("visitors")
+    .select(`
+      id,
+      name,
+      phone,
+      vehicle_number,
+      purpose,
+      entry_time,
+      exit_time,
+      security_id,
+      flat_id,
+      flats:flat_id (
+        id,
+        flat_number,
+        owner_name,
+        blocks:block_id (
+          name
+        ),
+        residents (
+          name
+        )
+      )
+    `)
+    .order("entry_time", { ascending: false });
+
+  if (visitorsErr) {
+    console.error("[visitors] SELECT error:", visitorsErr.message);
+    return [];
+  }
+
+  const { data: profilesData, error: profilesErr } = await supabase
+    .from("profiles")
+    .select("id, full_name");
+
+  const guardMap = new Map<string, string>();
+  if (!profilesErr && profilesData) {
+    profilesData.forEach((p) => {
+      guardMap.set(p.id, p.full_name || "System");
+    });
+  }
+
+  const list = (visitorsData ?? []) as any[];
+
+  return list.map((v) => {
+    const blockName = v.flats?.blocks?.name ?? "";
+    const flatNum = v.flats?.flat_number ?? "";
+    const flatLabel = blockName && flatNum ? `${blockName}-${flatNum}` : "N/A";
+    
+    const residentName = v.flats?.residents?.[0]?.name ?? v.flats?.owner_name ?? "Host";
+    const guardName = v.security_id ? (guardMap.get(v.security_id) ?? "Security Guard") : "Security Guard";
+
+    const checkInTime = v.entry_time
+      ? new Date(v.entry_time).toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+      : "";
+
+    const checkOutTime = v.exit_time
+      ? new Date(v.exit_time).toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+      : undefined;
+
+    const entryDate = v.entry_time
+      ? new Date(v.entry_time).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "";
+
+    return {
+      id: v.id,
+      name: v.name,
+      phone: v.phone || "—",
+      flat_id: v.flat_id || "",
+      flat: flatLabel,
+      host: residentName,
+      purpose: v.purpose as any,
+      checkIn: checkInTime,
+      checkOut: checkOutTime,
+      vehicle: v.vehicle_number || undefined,
+      date: entryDate,
+      guard: guardName,
+      entry_time_raw: v.entry_time,
+      exit_time_raw: v.exit_time,
+    };
+  });
+}
+
+export async function fetchActiveVisitorsDetailed(): Promise<VisitorDetailed[]> {
+  const all = await fetchVisitorsDetailed();
+  return all.filter((v) => !v.exit_time_raw);
+}
+
+export type MaintenanceRow = {
+  id: number;
+  asset_name: string;
+  location: string;
+  last_service_date: string | null;
+  next_due_date: string | null;
+  cost: number;
+  vendor_name: string;
+  vendor_contact: string;
+  status: string;
+};
+
+export async function fetchMaintenanceAll(): Promise<MaintenanceRow[]> {
+  const { data, error } = await supabase
+    .from("maintenance")
+    .select("*")
+    .order("next_due_date", { ascending: true });
+  return error ? [] : (data as MaintenanceRow[]) ?? [];
+}
+
+export async function insertMaintenanceEntry(args: {
+  asset_name: string;
+  location: string;
+  last_service_date: string | null;
+  next_due_date: string | null;
+  cost: number;
+  vendor_name: string;
+  vendor_contact: string;
+  status: string;
+}): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("maintenance").insert(args);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function updateMaintenanceEntry(
+  id: number,
+  args: {
+    asset_name?: string;
+    location?: string;
+    last_service_date?: string | null;
+    next_due_date?: string | null;
+    cost?: number;
+    vendor_name?: string;
+    vendor_contact?: string;
+    status?: string;
+  }
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("maintenance").update(args).eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function deleteMaintenanceEntry(id: number): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("maintenance").delete().eq("id", id);
+  return error ? { error: error.message } : { error: null };
+}
+

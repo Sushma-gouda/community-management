@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Search, LogIn, LogOut, Phone, Car, Building2, X, Filter } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { securityNav } from "@/components/dashboard/securityNav";
 import { FilterPill, PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchVisitorsDetailed, type VisitorDetailed } from "@/services/supabase/community";
+import { supabase } from "@/services/supabase/client";
 
 export const Route = createFileRoute("/dashboard/security/visitor-logs")({
   head: () => ({ meta: [{ title: "Visitor Logs — Communa Security" }] }),
@@ -11,153 +13,38 @@ export const Route = createFileRoute("/dashboard/security/visitor-logs")({
 });
 
 type VisitorType = "Guest" | "Delivery" | "Service" | "Cab";
-type LogEntry = {
-  id: string;
-  name: string;
-  phone: string;
-  flat: string;
-  host: string;
-  purpose: VisitorType;
-  checkIn: string;
-  checkOut?: string;
-  vehicle?: string;
-  date: string;
-  guard: string;
-};
-
-const allLogs: LogEntry[] = [
-  {
-    id: "V-501",
-    name: "Rohan Mehta",
-    phone: "+91 99887 11223",
-    flat: "A-204",
-    host: "Priya Mehta",
-    purpose: "Guest",
-    checkIn: "10:42 AM",
-    date: "May 11, 2026",
-    guard: "R. Singh",
-  },
-  {
-    id: "V-500",
-    name: "Amazon Delivery",
-    phone: "+91 99887 22334",
-    flat: "B-302",
-    host: "Anika Sharma",
-    purpose: "Delivery",
-    checkIn: "10:31 AM",
-    checkOut: "10:38 AM",
-    date: "May 11, 2026",
-    guard: "R. Singh",
-  },
-  {
-    id: "V-499",
-    name: "Plumber — Suresh",
-    phone: "+91 99887 33445",
-    flat: "C-101",
-    host: "Sunil Joshi",
-    purpose: "Service",
-    checkIn: "10:21 AM",
-    date: "May 11, 2026",
-    guard: "R. Singh",
-  },
-  {
-    id: "V-498",
-    name: "Uber Cab",
-    phone: "+91 99887 44556",
-    flat: "D-405",
-    host: "Arjun Rao",
-    purpose: "Cab",
-    checkIn: "09:55 AM",
-    checkOut: "10:02 AM",
-    vehicle: "MH-04 XY-9988",
-    date: "May 11, 2026",
-    guard: "M. Patil",
-  },
-  {
-    id: "V-497",
-    name: "Ravi Kumar (Family)",
-    phone: "+91 99887 55667",
-    flat: "D-405",
-    host: "Arjun Rao",
-    purpose: "Guest",
-    checkIn: "09:30 AM",
-    date: "May 11, 2026",
-    guard: "M. Patil",
-  },
-  {
-    id: "V-496",
-    name: "Swiggy Delivery",
-    phone: "+91 99887 66778",
-    flat: "A-101",
-    host: "Ravi Kumar",
-    purpose: "Delivery",
-    checkIn: "09:15 AM",
-    checkOut: "09:20 AM",
-    date: "May 11, 2026",
-    guard: "M. Patil",
-  },
-  {
-    id: "V-495",
-    name: "Electrician — Ramesh",
-    phone: "+91 99887 77889",
-    flat: "B-302",
-    host: "Anika Sharma",
-    purpose: "Service",
-    checkIn: "09:00 AM",
-    checkOut: "11:30 AM",
-    vehicle: "MH-12 XY-1234",
-    date: "May 11, 2026",
-    guard: "M. Patil",
-  },
-  {
-    id: "V-494",
-    name: "Meera's Parents",
-    phone: "+91 99887 88990",
-    flat: "C-204",
-    host: "Meera Pillai",
-    purpose: "Guest",
-    checkIn: "08:30 AM",
-    checkOut: "01:00 PM",
-    date: "May 10, 2026",
-    guard: "K. Sharma",
-  },
-  {
-    id: "V-493",
-    name: "Zomato Delivery",
-    phone: "+91 99887 99001",
-    flat: "A-204",
-    host: "Priya Mehta",
-    purpose: "Delivery",
-    checkIn: "08:15 AM",
-    checkOut: "08:20 AM",
-    date: "May 10, 2026",
-    guard: "K. Sharma",
-  },
-  {
-    id: "V-492",
-    name: "AC Technician",
-    phone: "+91 99887 00112",
-    flat: "B-302",
-    host: "Anika Sharma",
-    purpose: "Service",
-    checkIn: "10:00 AM",
-    checkOut: "12:30 PM",
-    date: "May 10, 2026",
-    guard: "K. Sharma",
-  },
-];
 
 const purposeTone = (p: VisitorType) =>
   p === "Guest" ? "primary" : p === "Delivery" ? "warning" : p === "Service" ? "accent" : "success";
 
 function VisitorLogs() {
+  const [allLogs, setAllLogs] = useState<VisitorDetailed[]>([]);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | VisitorType>("All");
   const [dateFilter, setDateFilter] = useState("All");
   const [flatFilter, setFlatFilter] = useState("");
-  const [selected, setSelected] = useState<LogEntry | null>(null);
+  const [selected, setSelected] = useState<VisitorDetailed | null>(null);
 
-  const dates = ["All", ...Array.from(new Set(allLogs.map((l) => l.date)))];
+  const loadLogs = () => {
+    fetchVisitorsDetailed().then(setAllLogs);
+  };
+
+  useEffect(() => {
+    loadLogs();
+
+    const channel = supabase
+      .channel("visitor_logs_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "visitors" }, () => {
+        loadLogs();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const dates = useMemo(() => ["All", ...Array.from(new Set(allLogs.map((l) => l.date)))], [allLogs]);
 
   const filtered = useMemo(
     () =>
@@ -172,7 +59,7 @@ function VisitorLogs() {
         const matchFlat = !flatFilter || l.flat.toLowerCase().includes(flatFilter.toLowerCase());
         return matchQ && matchType && matchDate && matchFlat;
       }),
-    [q, typeFilter, dateFilter, flatFilter],
+    [allLogs, q, typeFilter, dateFilter, flatFilter],
   );
 
   const inside = allLogs.filter((l) => !l.checkOut).length;

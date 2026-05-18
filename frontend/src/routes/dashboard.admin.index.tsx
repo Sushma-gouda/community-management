@@ -25,6 +25,8 @@ import {
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
 
+import { supabase } from "@/services/supabase/client";
+
 export const Route = createFileRoute("/dashboard/admin/")({
   head: () => ({ meta: [{ title: "Admin Dashboard — Communa" }] }),
   component: AdminDashboard,
@@ -83,6 +85,22 @@ function AdminDashboard() {
       }));
       setBlocksData(data);
     });
+
+    const channel = supabase
+      .channel("admin_dashboard_visitors_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "visitors" }, () => {
+        adminActiveVisitorCount().then((vis) => {
+          setStats((prev) => ({
+            ...prev,
+            activeVisitors: vis,
+          }));
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
